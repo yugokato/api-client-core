@@ -1,0 +1,111 @@
+[build-system]
+requires = ["setuptools >= 64.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "api-client-core"
+description = "A framework for building Python API clients with decorator-based endpoint definitions"
+readme = "README.md"
+license = {file="LICENSE"}
+authors = [
+  { name = "Yugo Kato", email =  "yugokato.o@gmail.com" },
+]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed"
+]
+dependencies = [
+    "common-libs[rest-client,http3]@git+https://github.com/yugokato/common-libs",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "common-libs[dev,test]"
+]
+
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+api_client_core = ["cfg/*", "py.typed"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # Pyflakes
+    "FA",   # flake8-future-annotations
+    "I",    # isort
+    "PIE",  # flake8-pie
+    "PLC",  # Pylint convention
+    "PLE",  # Pylint error
+    "PLW",  # Pylint warning
+    "RUF",  # Ruff-specific rules
+    "T20",  # flake8-print
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warning
+]
+ignore = [
+    "E731",     # lambda-assignment
+    "E741",     # ambiguous-variable-name
+    "F403",     # undefined-local-with-import-star
+    "PIE790",   # unnecessary-placeholder
+    "PLC0206",  # dict-index-missing-items
+    "PLC0415",  # import-outside-top-level
+    "PLW2901",  # redefined-loop-name
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.mypy]
+files = [
+    "src"
+]
+mypy_path = [
+    "src"
+]
+follow_imports = "skip"
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_untyped_defs = true
+follow_untyped_imports = false
+ignore_missing_imports = true
+strict_equality = true
+warn_redundant_casts = true
+warn_unreachable = true
+warn_unused_ignores = true
+disable_error_code = [
+    "import-untyped",
+    "misc",
+    "operator",
+    "override",
+    "return",
+    "union-attr"
+]
