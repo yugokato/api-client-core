@@ -6,10 +6,12 @@ from common_libs.logging import get_logger, setup_logging
 from api_client_core.base import APIBase, APIClient
 from api_client_core.endpoints import Endpoint, EndpointFunc, Stats, endpoint
 
+__all__ = ["APIBase", "APIClient", "Endpoint", "EndpointFunc", "Stats", "__version__", "endpoint"]
+
 try:
     __version__ = version("api-client-core")
 except PackageNotFoundError:
-    pass
+    __version__ = "unknown"
 
 _CONFIG_DIR = Path(__file__).parent / "cfg"
 
