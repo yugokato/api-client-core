@@ -20,7 +20,7 @@ from common_libs.clients.rest_client.types import Request, Response
 from httpx import AsyncClient, Client, ConnectError
 from pytest_mock import MockerFixture
 
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints.stats import (
     _HISTOGRAM_REL_ACCURACY,
     EndpointStat,
@@ -574,7 +574,7 @@ class TestCollectStatsScope:
         assert stats.get(_endpoint).num_calls == 1
 
     async def test_asyncio_gather_propagates_scope(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that asyncio.gather tasks inherit the enclosing Stats.collect() scope."""
         mocker.patch.object(AsyncClient, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -614,7 +614,7 @@ class TestCollectStatsDecorator:
     """Tests for the collect_stats decorator on EndpointFunc.__call__."""
 
     def test_sync_call_records_2xx_stats(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that a successful sync API call is recorded with correct status and timing."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker, 200, 0.1))
@@ -629,7 +629,7 @@ class TestCollectStatsDecorator:
         assert stat.avg_response_time is not None
 
     def test_sync_call_records_5xx_stats(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that a 5xx sync API call increments num_5xx."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker, 503, 0.2))
@@ -642,7 +642,7 @@ class TestCollectStatsDecorator:
         assert stat.num_2xx == 0
 
     def test_sync_call_error_records_num_errors(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that an HTTPError during a sync call records num_errors and re-raises."""
         mock_request = mocker.MagicMock(spec=Request)
@@ -661,7 +661,7 @@ class TestCollectStatsDecorator:
         assert stat.avg_response_time is None
 
     def test_stats_recording_failure_is_swallowed(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that a bug in StatsCollector.record never propagates to the caller."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -676,7 +676,7 @@ class TestCollectStatsDecorator:
         assert isinstance(r, RestResponse)
 
     def test_with_repeat_counts_each_attempt(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_repeat(num=N) records N individual calls in Stats."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -687,7 +687,7 @@ class TestCollectStatsDecorator:
         assert stat.num_calls == 3
 
     def test_with_concurrency_propagates_scope(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_concurrency(num=N) propagates the Stats.collect() scope to worker threads."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -700,7 +700,7 @@ class TestCollectStatsDecorator:
         assert Stats.get(_endpoint).num_calls == 4
 
     async def test_async_call_records_stats(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that a successful async API call is recorded in Stats."""
         mocker.patch.object(AsyncClient, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -713,7 +713,7 @@ class TestCollectStatsDecorator:
         assert stat.num_2xx == 1
 
     async def test_scoped_and_global_both_record_on_async_call(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that an async call within a scope records to both the scope and global."""
         mocker.patch.object(AsyncClient, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -1085,7 +1085,7 @@ class TestStatsDisable:
         assert Stats.is_enabled() is True
 
     def test_disable_stops_automatic_recording(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that disabling Stats prevents API calls from being recorded."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -1097,7 +1097,7 @@ class TestStatsDisable:
         assert Stats.get(_endpoint) is None
 
     def test_enable_resumes_recording(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that re-enabling Stats after disable() resumes recording."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))
@@ -1120,7 +1120,7 @@ class TestStatsDisable:
         assert Stats.is_enabled() is True
 
     def test_disable_retains_existing_data(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that disabling does not clear already-recorded stats."""
         mocker.patch.object(Client, "request", side_effect=lambda *a, **k: _make_mock_response(mocker))

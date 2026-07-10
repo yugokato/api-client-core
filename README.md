@@ -20,10 +20,10 @@ The framework uses the `httpx`-based REST client from [common-libs](https://gith
   - [Endpoint Factory (`endpoint`)](#endpoint-factory-endpoint)
   - [Endpoint Functions (`EndpointFunc`)](#endpoint-functions-endpointfunc)
   - [API Client (`APIClient`)](#api-client-apiclient)
-  - [API Class (`APIBase`)](#api-class-apibase)
+  - [API Class (`BaseAPI`)](#api-class-baseapi)
   - [Endpoint Object (`Endpoint`)](#endpoint-object-endpoint)
   - [API Statistics (`Stats`)](#api-statistics-stats)
-  - [Automatic Discovery (`APIBase.init()`)](#automatic-discovery-apibaseinit)
+  - [Automatic Discovery (`BaseAPI.init()`)](#automatic-discovery-baseapiinit)
 - [Sync vs Async](#sync-vs-async)
 - [Type and Response Reference](#type-and-response-reference)
 - [Extending Core](#extending-core)
@@ -52,11 +52,11 @@ pip install git+https://github.com/yugokato/api-client-core
 Define an API endpoint by decorating a class method with `@endpoint.<method>("/path")`:
 
 ```python
-from api_client_core import APIBase, endpoint
+from api_client_core import BaseAPI, endpoint
 from api_client_core.types import RestResponse
 
 
-class UsersAPI(APIBase):
+class UsersAPI(BaseAPI):
     """User APIs"""
     
     @endpoint.get("/users/{user_id}")
@@ -105,7 +105,7 @@ The example uses a fictional "my-app" API service at `https://api.example.com`.
 
 ### 1. Define each API class and its endpoints
 
-Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `APIBase`, and add methods using the `@endpoint.<method>("/path")` endpoint factory decorator. The framework automatically maps function parameters to path parameters, query parameters, or the request body based on the endpoint definition.
+Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `BaseAPI`, and add methods using the `@endpoint.<method>("/path")` endpoint factory decorator. The framework automatically maps function parameters to path parameters, query parameters, or the request body based on the endpoint definition.
 
 <details open>
 <summary><code>auth.py</code></summary>
@@ -115,11 +115,11 @@ Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `A
 
 from typing import Annotated, Unpack
 
-from api_client_core import APIBase, endpoint
+from api_client_core import BaseAPI, endpoint
 from api_client_core.types import RestResponse, Kwargs, Query, Unset
 
 
-class AuthAPI(APIBase):
+class AuthAPI(BaseAPI):
     """Auth APIs"""
 
     @endpoint.is_public
@@ -152,11 +152,11 @@ class AuthAPI(APIBase):
 
 from typing import Unpack
 
-from api_client_core import APIBase, endpoint
+from api_client_core import BaseAPI, endpoint
 from api_client_core.types import RestResponse, Kwargs, Unset
 
 
-class UsersAPI(APIBase):
+class UsersAPI(BaseAPI):
     """User APIs"""
 
     @endpoint.post("/users")
@@ -183,7 +183,7 @@ class UsersAPI(APIBase):
 > - `**kwargs` takes framework-level request control options and raw `httpx` options.
 
 > [!TIP]
-> - Consider creating an app-level base class instead of subclassing `APIBase` directly. See [API Class (`APIBase`)](#api-class-apibase) for details.
+> - Consider creating an app-level base class instead of subclassing `BaseAPI` directly. See [API Class (`BaseAPI`)](#api-class-baseapi) for details.
 > - If your use case is async-only, you can define the endpoint with `async def` instead of `def`. See [Sync vs Async](#sync-vs-async) for details.
 
 ### 2. Define the API client
@@ -480,28 +480,28 @@ class APIClient:
 | `**kwargs`       | Additional keyword arguments forwarded to the underlying REST client constructor (e.g., `retry_policy`, `headers`, `timeout`, `verify`).                              |
 
 
-## API Class (`APIBase`)
+## API Class (`BaseAPI`)
 
-`APIBase` is the abstract base class for all API classes:
+`BaseAPI` is the abstract base class for all API classes:
 
 ```python
-class AuthAPI(APIBase):
+class AuthAPI(BaseAPI):
 
     @endpoint.post("/auth/login")
     def login(self, username: str, password: str, **kwargs: Unpack[Kwargs]) -> RestResponse:
         ...
 ```
 
-Create a dedicated app-level base class by subclassing `APIBase` if your project contains multiple API clients. This gives each client its own base class where you can define client-specific configuration and behavior, such as `app_name`, request hooks, and other extension points.
+Create a dedicated app-level base class by subclassing `BaseAPI` if your project contains multiple API clients. This gives each client its own base class where you can define client-specific configuration and behavior, such as `app_name`, request hooks, and other extension points.
 
 
 ```python
 # App-level base — one per application
-class MyAppBaseAPI(APIBase):
+class MyAppBaseAPI(BaseAPI):
     app_name = "my-app"   # must match api_client.app_name
 
 
-# Concrete API classes then inherit from the app-level base instead of APIBase directly
+# Concrete API classes then inherit from the app-level base instead of BaseAPI directly
 class AuthAPI(MyAppBaseAPI):
 
     @endpoint.post("/auth/login")
@@ -516,13 +516,13 @@ class AuthAPI(MyAppBaseAPI):
 | `app_name`      | `str \| None`            | Optional. If set, must match `api_client.app_name`                          |
 | `is_documented` | `bool`                   | Marks every endpoint in the class as documented (default `True`).           |
 | `is_deprecated` | `bool`                   | Marks every endpoint in the class as deprecated (default `False`).          |
-| `endpoints`     | `list[Endpoint] \| None` | Populated by `APIBase.init()`. Lists all `Endpoint` objects for this class. |
+| `endpoints`     | `list[Endpoint] \| None` | Populated by `BaseAPI.init()`. Lists all `Endpoint` objects for this class. |
 
 The class-level `is_documented`/`is_deprecated` flags can also be controlled per-endpoint via the `endpoint` factory decorators (see [Endpoint Factory](#endpoint-factory-endpoint) above).
 
 ### Request hooks
 
-Override these methods on your API class to customize request and response behavior. To share the same hooks across multiple API classes, define them once on a dedicated app-level base class instead (see [API Class (`APIBase`)](#api-class-apibase) above).
+Override these methods on your API class to customize request and response behavior. To share the same hooks across multiple API classes, define them once on a dedicated app-level base class instead (see [API Class (`BaseAPI`)](#api-class-baseapi) above).
 
 #### `pre_request_hook`
 
@@ -586,11 +586,11 @@ from typing import Any
 
 from httpx import HTTPError
 
-from api_client_core import APIBase, Endpoint
+from api_client_core import BaseAPI, Endpoint
 from api_client_core.types import RestResponse
 
 
-class MyAppBaseAPI(APIBase):
+class MyAppBaseAPI(BaseAPI):
     app_name = "my-app"
 
     def post_request_hook(
@@ -615,7 +615,7 @@ class MyAppBaseAPI(APIBase):
 
 | Field           | Type                  | Description                                                                    |
 |-----------------|-----------------------|--------------------------------------------------------------------------------|
-| `api_class`     | `type[APIBase]`       | The API class that owns this endpoint.                                         |
+| `api_class`     | `type[BaseAPI]`       | The API class that owns this endpoint.                                         |
 | `method`        | `str`                 | HTTP method in lowercase (e.g., `"get"`, `"post"`).                            |
 | `path`          | `str`                 | Endpoint path (e.g., `"/auth/login"`).                                         |
 | `func_name`     | `str`                 | Name of the original API class function.                                       |
@@ -736,19 +736,19 @@ Call `Stats.reset()` to clear all recorded stats.
 Set `API_CLIENT_STATS_DISABLED` to `1`, `true`, or `yes` (case-insensitive) before import to disable collection process-wide, or call `Stats.disable()` at runtime. Call `Stats.enable()` to re-enable it. Existing data is retained in both cases. Call `Stats.reset()` to clear it.
 
 
-## Automatic Discovery (`APIBase.init()`)
+## Automatic Discovery (`BaseAPI.init()`)
 
-Call `<YourBaseAPIClass>.init()` from the `__init__.py` of your API class directory. It scans all `.py` files in that directory, discovers every subclass of the specified base class, and populates each class's `.endpoints` list. `<YourBaseAPIClass>` is `APIBase` itself if your concrete API classes subclass it directly, or your app-level base class if you're using that pattern.
+Call `<YourBaseAPIClass>.init()` from the `__init__.py` of your API class directory. It scans all `.py` files in that directory, discovers every subclass of the specified base class, and populates each class's `.endpoints` list. `<YourBaseAPIClass>` is `BaseAPI` itself if your concrete API classes subclass it directly, or your app-level base class if you're using that pattern.
 
 ```python
 # myproject/clients/my_app/api/__init__.py
 
-from api_client_core import APIBase
+from api_client_core import BaseAPI
 
-API_CLASSES = APIBase.init()
+API_CLASSES = BaseAPI.init()
 ```
 
-After this runs, `API_CLASSES` is a `list[type[APIBase]]` — one entry per discovered API class:
+After this runs, `API_CLASSES` is a `list[type[BaseAPI]]` — one entry per discovered API class:
 
 ```pycon
 >>> from myproject.clients.my_app.api import API_CLASSES
@@ -766,7 +766,7 @@ GET /users
 ```
 
 > [!NOTE]
-> `APIBase.init()` must be called from an `__init__.py` file. Calling it from any other module raises a `RuntimeError`.
+> `BaseAPI.init()` must be called from an `__init__.py` file. Calling it from any other module raises a `RuntimeError`.
 
 
 # Sync vs Async
@@ -940,7 +940,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Concatenate, ParamSpec, TypeVar
 
-from api_client_core import APIBase, endpoint
+from api_client_core import BaseAPI, endpoint
 from api_client_core.types import RestResponse
 
 P = ParamSpec("P")
@@ -948,11 +948,11 @@ R = TypeVar("R", bound=RestResponse)
 
 
 @endpoint.decorator
-def no_prod(f: Callable[Concatenate[APIBase, P], R]) -> Callable[Concatenate[APIBase, P], R]:
+def no_prod(f: Callable[Concatenate[BaseAPI, P], R]) -> Callable[Concatenate[BaseAPI, P], R]:
     """Raise if called against a production environment."""
 
     @wraps(f)
-    def wrapper(self: APIBase, *args: P.args, **kwargs: P.kwargs) -> R:
+    def wrapper(self: BaseAPI, *args: P.args, **kwargs: P.kwargs) -> R:
         if self.env == "prod":
             raise RuntimeError(f"{f.__name__!r} must not be called against production")
         return f(self, *args, **kwargs)
@@ -1006,7 +1006,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from api_client_core import APIBase, EndpointFunc
+from api_client_core import BaseAPI, EndpointFunc
 from api_client_core.types import RestResponse
 
 
@@ -1023,7 +1023,7 @@ def timing_wrapper(call: Callable[..., RestResponse]) -> Callable[..., RestRespo
     return wrapper
 
 
-class MyAppBaseAPI(APIBase):
+class MyAppBaseAPI(BaseAPI):
     app_name = "my-app"
 
     def request_wrapper(self) -> list[Callable[..., Any]]:
@@ -1035,7 +1035,7 @@ class MyAppBaseAPI(APIBase):
 
 ## Plug in custom `Endpoint` / `EndpointFunc` subclasses
 
-`APIBase` exposes three class-level attributes that control which concrete classes are instantiated at runtime:
+`BaseAPI` exposes three class-level attributes that control which concrete classes are instantiated at runtime:
 
 | Attribute                    | Default             | Purpose                                                                   |
 |------------------------------|---------------------|---------------------------------------------------------------------------|
@@ -1046,7 +1046,7 @@ class MyAppBaseAPI(APIBase):
 Override any of them on your app-level base class to inject custom behavior into the endpoint lifecycle without modifying framework code:
 
 ```python
-from api_client_core import APIBase
+from api_client_core import BaseAPI
 from api_client_core.endpoints.endpoint_func import SyncEndpointFunc, AsyncEndpointFunc
 
 
@@ -1064,7 +1064,7 @@ class MyAsyncEndpointFunc(AsyncEndpointFunc):
         print(f"Endpoint: {self.endpoint}")
 
 
-class MyAppBaseAPI(APIBase):
+class MyAppBaseAPI(BaseAPI):
     app_name = "my-app"
     _sync_endpoint_func_class = MyEndpointFunc
     _async_endpoint_func_class = MyAsyncEndpointFunc

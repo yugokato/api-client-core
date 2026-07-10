@@ -1,4 +1,4 @@
-"""Unit tests for APIBase (api_class.py)."""
+"""Unit tests for BaseAPI (api_class.py)."""
 
 from __future__ import annotations
 
@@ -9,28 +9,28 @@ from common_libs.clients.rest_client import RestResponse
 from pytest_mock import MockerFixture
 
 from api_client_core import endpoint
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 from api_client_core.base.api_class import get_api_classes
 from api_client_core.endpoints import Endpoint
 
 
-class TestAPIBaseInit:
-    """Tests for APIBase.init()"""
+class TestBaseAPIInit:
+    """Tests for BaseAPI.init()"""
 
-    def test_init_supports_direct_apibase_subclassing(
+    def test_init_supports_direct_baseapi_subclassing(
         self, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that init() can be called directly on APIBase when API classes subclass APIBase directly"""
-        # APIBase.endpoints is a shared class attribute. Restore it after the test since init() assigns it directly.
-        monkeypatch.setattr(APIBase, "endpoints", APIBase.endpoints)
+        """Test that init() can be called directly on BaseAPI when API classes subclass BaseAPI directly"""
+        # BaseAPI.endpoints is a shared class attribute. Restore it after the test since init() assigns it directly.
+        monkeypatch.setattr(BaseAPI, "endpoints", BaseAPI.endpoints)
 
-        class DirectAuthAPI(APIBase):
+        class DirectAuthAPI(BaseAPI):
             app_name = "direct-test"
 
             @endpoint.get("/v1/auth")
             def get_auth(self) -> RestResponse: ...
 
-        class DirectUsersAPI(APIBase):
+        class DirectUsersAPI(BaseAPI):
             app_name = "direct-test"
 
             @endpoint.get("/v1/users")
@@ -45,21 +45,21 @@ class TestAPIBaseInit:
             return_value=[DirectAuthAPI, DirectUsersAPI],
         )
 
-        result: list[type[APIBase]] = APIBase.init()
+        result: list[type[BaseAPI]] = BaseAPI.init()
 
         assert result == [DirectAuthAPI, DirectUsersAPI]
         assert DirectAuthAPI.endpoints is not None
         assert len(DirectAuthAPI.endpoints) == 1
         assert DirectUsersAPI.endpoints is not None
         assert len(DirectUsersAPI.endpoints) == 1
-        assert APIBase.endpoints is not None
-        paths = [ep.path for ep in APIBase.endpoints]
+        assert BaseAPI.endpoints is not None
+        paths = [ep.path for ep in BaseAPI.endpoints]
         assert paths == ["/v1/auth", "/v1/users"]
 
     def test_init_raises_runtime_error_when_not_called_from_init_py(self) -> None:
         """Test that calling init() from a non-__init__.py file raises RuntimeError"""
 
-        class MyBaseAPI(APIBase):
+        class MyBaseAPI(BaseAPI):
             app_name = "test"
 
         # This test file is not __init__.py, so calling init() here raises
@@ -69,7 +69,7 @@ class TestAPIBaseInit:
     def test_init_populates_endpoints_on_discovered_classes(self, mocker: MockerFixture) -> None:
         """Test that init() populates the endpoints list on each discovered API class"""
 
-        class DiscoveryBaseAPI(APIBase):
+        class DiscoveryBaseAPI(BaseAPI):
             app_name = "discovery-test"
 
         class DiscoveryConcreteAPI(DiscoveryBaseAPI):
@@ -100,7 +100,7 @@ class TestAPIBaseInit:
     def test_init_populates_base_class_endpoints_as_sorted_aggregate(self, mocker: MockerFixture) -> None:
         """Test that init() populates the base class endpoints list with sorted aggregate of all subclass endpoints"""
 
-        class AggregateBaseAPI(APIBase):
+        class AggregateBaseAPI(BaseAPI):
             app_name = "agg-test"
 
         # AggregateAlphaAPI sorts before AggregateBetaAPI by class name
@@ -135,7 +135,7 @@ class TestAPIBaseInit:
     def test_init_returns_discovered_api_classes(self, mocker: MockerFixture) -> None:
         """Test that init() returns the list of discovered API classes"""
 
-        class ReturnBaseAPI(APIBase):
+        class ReturnBaseAPI(BaseAPI):
             app_name = "return-test"
 
         class ReturnAPI(ReturnBaseAPI):
@@ -158,13 +158,13 @@ class TestAPIBaseInit:
         assert result == [ReturnAPI]
 
 
-class TestAPIBaseInstantiation:
-    """Tests for APIBase.__init__"""
+class TestBaseAPIInstantiation:
+    """Tests for BaseAPI.__init__"""
 
     def test_app_name_mismatch_raises_value_error(self, api_client: APIClient) -> None:
         """Test that instantiating an API class with a mismatched app_name raises ValueError"""
 
-        class MismatchedAPI(APIBase):
+        class MismatchedAPI(BaseAPI):
             app_name = "wrong-app"
 
             @endpoint.get("/v1/test")
@@ -176,7 +176,7 @@ class TestAPIBaseInstantiation:
     def test_unset_app_name_skips_validation(self, api_client: APIClient) -> None:
         """Test that instantiating an API class with no app_name set does not raise, regardless of client app_name"""
 
-        class NoAppNameAPI(APIBase):
+        class NoAppNameAPI(BaseAPI):
             @endpoint.get("/v1/test")
             def get_test(self) -> RestResponse: ...
 
@@ -184,9 +184,9 @@ class TestAPIBaseInstantiation:
         assert instance.api_client is api_client
 
     def test_instantiation_sets_env_and_rest_client(self, api_client: APIClient) -> None:
-        """Test that APIBase.__init__ copies env and rest_client from the API client"""
+        """Test that BaseAPI.__init__ copies env and rest_client from the API client"""
 
-        class MatchedAPI(APIBase):
+        class MatchedAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/test")

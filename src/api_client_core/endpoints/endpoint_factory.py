@@ -9,10 +9,10 @@ from ..types import RestResponse
 from .endpoint_handler import DeferredOperation, EndpointHandler, PendingHandler, PendingOperations
 
 if TYPE_CHECKING:
-    from ..base import APIBase
+    from ..base import BaseAPI
 
 
-T = TypeVar("T", bound="APIBase[Any]")
+T = TypeVar("T", bound="BaseAPI[Any]")
 P = ParamSpec("P")
 R = TypeVar("R", bound=RestResponse)
 _OrigFunc: TypeAlias = Callable[Concatenate[T, P], R | Coroutine[Any, Any, R]]
@@ -194,9 +194,9 @@ class endpoint:
 
         :param obj: Endpoint handler, API class, or API function
         """
-        from ..base import APIBase
+        from ..base import BaseAPI
 
-        if inspect.isclass(obj) and issubclass(obj, APIBase):
+        if inspect.isclass(obj) and issubclass(obj, BaseAPI):
             obj.is_documented = False
             return cast(type[T], obj)
         return endpoint._apply_operations(obj, lambda h: setattr(h, "is_documented", False))
@@ -236,9 +236,9 @@ class endpoint:
 
         :param obj: Endpoint handler, API class, or API function
         """
-        from ..base import APIBase
+        from ..base import BaseAPI
 
-        if inspect.isclass(obj) and issubclass(obj, APIBase):
+        if inspect.isclass(obj) and issubclass(obj, BaseAPI):
             obj.is_deprecated = True
             return cast(type[T], obj)
         return endpoint._apply_operations(obj, lambda h: setattr(h, "is_deprecated", True))

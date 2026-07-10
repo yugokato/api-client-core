@@ -9,12 +9,12 @@ from pytest import FixtureRequest
 from pytest_mock import MockerFixture
 
 from api_client_core import endpoint
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 
 pytest_plugins = ["common_libs.testing.pytest_plugins.common"]
 
 ClientT = TypeVar("ClientT", bound=APIClient)
-ClassT = TypeVar("ClassT", bound=APIBase)
+ClassT = TypeVar("ClassT", bound=BaseAPI)
 
 # `get_supported_request_parameters()` is `lru_cache`d against the real `httpx.Client.request` signature.
 # Call it here, at collection time, so the cache is primed before `api_client_factory` below replaces
@@ -41,11 +41,11 @@ def api_client_factory(session_mocker: MockerFixture) -> Callable[..., APIClient
 
 
 @pytest.fixture(scope="module")
-def api_class_factory() -> Callable[..., type[APIBase]]:
+def api_class_factory() -> Callable[..., type[BaseAPI]]:
     """API class factory that creates a testable API class with one endpoint function"""
 
-    def create_api_class(api_client: APIClient) -> type[APIBase]:
-        class TestAPI(APIBase):
+    def create_api_class(api_client: APIClient) -> type[BaseAPI]:
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")

@@ -15,7 +15,7 @@ from httpx import Client
 from pytest_mock import MockerFixture
 
 import api_client_core.endpoints.utils.endpoint_call as endpoint_call_util
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints import AsyncEndpointFunc, Endpoint, EndpointFunc, SyncEndpointFunc, endpoint
 from api_client_core.types import Alias, EndpointModel, Query, Unset
 
@@ -25,7 +25,7 @@ class TestEndpointFunc:
 
     @pytest.mark.parametrize("api_client", ["sync", "async"], indirect=True)
     @pytest.mark.parametrize("access_by", ["instance", "class"])
-    def test_endpoint_func_access(self, api_client: APIClient, api_class: type[APIBase], access_by: str) -> None:
+    def test_endpoint_func_access(self, api_client: APIClient, api_class: type[BaseAPI], access_by: str) -> None:
         """Test that accessing endpoint via API class or instance returns an EndpointFunc, and the correct subclass
         based on async_mode
         """
@@ -41,7 +41,7 @@ class TestEndpointFunc:
         else:
             assert isinstance(endpoint_func, SyncEndpointFunc)
 
-    def test_repr(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_repr(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that EndpointFunc.__repr__ contains the endpoint and a 'mapped to' reference to the original function"""
         instance = api_class(api_client)
         endpoint_func = instance.get_something
@@ -51,7 +51,7 @@ class TestEndpointFunc:
 
     @pytest.mark.parametrize("access_by", ["instance", "class"])
     def test_endpoint_property_returns_endpoint_object(
-        self, api_client: APIClient, api_class: type[APIBase], access_by: str
+        self, api_client: APIClient, api_class: type[BaseAPI], access_by: str
     ) -> None:
         """Test that EndpointFunc.endpoint returns an Endpoint object"""
         if access_by == "instance":
@@ -61,7 +61,7 @@ class TestEndpointFunc:
         endpoint = api_class_or_instance.get_something.endpoint
         assert isinstance(endpoint, Endpoint)
 
-    def test_model_property_returns_endpoint_model(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_model_property_returns_endpoint_model(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that EndpointFunc.model returns a subclass of EndpointModel"""
 
         instance = api_class(api_client)
@@ -69,14 +69,14 @@ class TestEndpointFunc:
         endpoint_model = endpoint_func.model
         assert issubclass(endpoint_model, EndpointModel)
 
-    def test_model_property_name(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_model_property_name(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that EndpointFunc.model name follows <APIClass><FuncName>EndpointModel convention"""
 
         instance = api_class(api_client)
         endpoint_func = instance.get_something
         assert endpoint_func.model.__name__ == "TestAPIGetSomethingEndpointModel"
 
-    def test_endpoint_func_call_requires_instance(self, api_class: type[APIBase]) -> None:
+    def test_endpoint_func_call_requires_instance(self, api_class: type[BaseAPI]) -> None:
         """Test that calling __call__() raises TypeError when accessed without an API instance"""
         endpoint_func = api_class.get_something
         assert endpoint_func._instance is None
@@ -88,7 +88,7 @@ class TestEndpointFunc:
         ):
             endpoint_func()
 
-    def test_requires_instance_method_name_for_non_call_method(self, api_class: type[APIBase]) -> None:
+    def test_requires_instance_method_name_for_non_call_method(self, api_class: type[BaseAPI]) -> None:
         """Test that requires_instance uses the method name (not original func name) for non-__call__ methods
 
         requires_instance has branching logic: it uses self._original_func.__name__ when f.__name__ == "__call__"
@@ -110,8 +110,8 @@ class TestEndpointParamDefinition:
     Both path and Non-path parameters can be passed either positionally or as keyword arguments.
     """
 
-    def _make_api(self, api_client: APIClient) -> type[APIBase]:
-        class TestAPI(APIBase):
+    def _make_api(self, api_client: APIClient) -> type[BaseAPI]:
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/customers/{customer_id}")
@@ -214,7 +214,7 @@ class TestEndpointParamDefinition:
         """Test that body/query param defaults are NOT auto-included in pre_request_hook kwargs."""
         captured: list[dict[str, Any]] = []
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             def pre_request_hook(self, endpoint: Any, *args: Any, **params: Any) -> None:
@@ -253,7 +253,7 @@ class TestEndpointParamDefinition:
         """Test that {customer-id} placeholder is matched against the cleaned param name 'customer_id'."""
         path_spy, params_spy = self._spy_path_and_params(mocker)
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/customers/{customer-id}")
@@ -271,7 +271,7 @@ class TestEndpointParamDefinition:
         """Test that {customer-id} placeholder is matched when the param is passed as a keyword argument."""
         path_spy, params_spy = self._spy_path_and_params(mocker)
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/customers/{customer-id}")
@@ -287,7 +287,7 @@ class TestEndpointParamDefinition:
         """Test that a signature default is applied for a non-identifier placeholder param."""
         path_spy, params_spy = self._spy_path_and_params(mocker)
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/customers/{customer-id}")
@@ -302,7 +302,7 @@ class TestEndpointParamDefinition:
     def test_non_identifier_placeholder_model_categorization(self, api_client: APIClient) -> None:
         """Test that create_endpoint_model recognises a cleaned-name param as a path field."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/customers/{customer-id}")
@@ -324,7 +324,7 @@ class TestEndpointParamDefinition:
         """Test that a body/query default is not leaked into the hook when using a non-identifier placeholder."""
         captured: list[dict[str, Any]] = []
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             def pre_request_hook(self, endpoint: Any, *args: Any, **params: Any) -> None:
@@ -357,7 +357,7 @@ class TestEndpointFuncSignatureDefaults:
     def test_defaults_merged_to_payload(self, spy_generate: MagicMock, api_client: APIClient) -> None:
         """Test that endpoint signature defaults are included in the request payload."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items")
@@ -373,7 +373,7 @@ class TestEndpointFuncSignatureDefaults:
     def test_unset_is_excluded_from_payload(self, spy_generate: MagicMock, api_client: APIClient) -> None:
         """Test that endpoint signature defaults with the Unset sentinel are excluded from the request payload."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items")
@@ -389,7 +389,7 @@ class TestEndpointFuncSignatureDefaults:
     def test_explicit_params_override_defaults(self, spy_generate: MagicMock, api_client: APIClient) -> None:
         """Test that explicitly-supplied params override signature defaults in the payload."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items")
@@ -406,7 +406,7 @@ class TestEndpointModelFieldDefaults:
     def test_endpoint_model_field_defaults(self, api_client: APIClient) -> None:
         """Test endpoint model field gets correct default value."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/customers/{customer_id}/orders/{order_id}")
@@ -430,7 +430,7 @@ class TestEndpointModelFieldDefaults:
     def test_endpoint_model_no_default_body_param_gets_unset(self, api_client: APIClient) -> None:
         """Test that a body/query param with no signature default gets Unset in the model."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items/{item_id}")
@@ -453,7 +453,7 @@ class TestQueryMarkerRouting:
     """
 
     def _make_request_and_capture(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> dict[str, Any]:
         """Helper: call the single endpoint on api_class with mode='test' and return httpx call kwargs."""
         mock_request = mocker.patch.object(Client, "request")
@@ -467,7 +467,7 @@ class TestQueryMarkerRouting:
     ) -> None:
         """Test that Annotated[T, <query metadata>] sends the param as a URL query string on a non-GET endpoint."""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items/{item_id}")
@@ -486,7 +486,7 @@ class TestQueryMarkerRouting:
         """
         mock_request = mocker.patch.object(Client, "request")
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items/{item_id}")
@@ -509,7 +509,7 @@ class TestQueryMarkerRouting:
         """
         mock_request = mocker.patch.object(Client, "request")
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items/{item_id}")
@@ -529,7 +529,7 @@ class TestQueryMarkerRouting:
         """
         mock_request = mocker.patch.object(Client, "request")
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items/{item_id}")
@@ -552,7 +552,7 @@ class TestQueryMarkerRouting:
         """Test that a union of Annotated[] types picks the variant matching the given value's type."""
         mock_request = mocker.patch.object(Client, "request")
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items/{item_id}")
@@ -586,7 +586,7 @@ class TestQueryMarkerRouting:
         """
         mock_request = mocker.patch.object(Client, "request")
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/items/{item_id}")

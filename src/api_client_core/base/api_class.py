@@ -20,13 +20,13 @@ if TYPE_CHECKING:
     from .api_client import APIClient
 
 
-APIClassT = TypeVar("APIClassT", bound="APIBase[Any]")
+APIClassT = TypeVar("APIClassT", bound="BaseAPI[Any]")
 APIClientT = TypeVar("APIClientT", bound="APIClient")
 
 logger = get_logger(__name__)
 
 
-class APIBase(Generic[APIClientT], metaclass=ABCMeta):
+class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
     """Base API class"""
 
     app_name: str | None = None
@@ -147,8 +147,8 @@ class APIBase(Generic[APIClientT], metaclass=ABCMeta):
     def init(cls: type[APIClassT]) -> list[type[APIClassT]]:
         """Initialize API classes and return a list of API classes.
 
-        Call this on either an app-level base class whose concrete API classes subclass it or directly on `APIBase`
-        when concrete API classes subclass `APIBase` itself.
+        Call this on either an app-level base class whose concrete API classes subclass it or directly on `BaseAPI`
+        when concrete API classes subclass `BaseAPI` itself.
 
         A list of Endpoint objects for all API classes is available via the class `init()` was called on, i.e.
         `cls.endpoints`.

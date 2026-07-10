@@ -25,7 +25,7 @@ from .utils import endpoint_call as endpoint_call_util
 from .utils import endpoint_model as endpoint_model_util
 
 if TYPE_CHECKING:
-    from ..base import APIBase
+    from ..base import BaseAPI
     from ..base.api_client import APIClient
     from ..types import _ResponseList, _ResponseOrExceptionList, _ResponsePages, _ResponseStream
     from .endpoint import Endpoint
@@ -121,7 +121,7 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
 
     executor: SyncExecutor[P] | AsyncExecutor[P] | None = None
 
-    def __init__(self, endpoint_handler: EndpointHandler[P], instance: APIBase[Any] | None, owner: type[APIBase[Any]]):
+    def __init__(self, endpoint_handler: EndpointHandler[P], instance: BaseAPI[Any] | None, owner: type[BaseAPI[Any]]):
         """Initialize endpoint function"""
         self.method = endpoint_handler.method
         self.path = endpoint_handler.path
@@ -139,8 +139,8 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
         self._base_call: Callable[..., Any] | None = None
         self._terminal_wrapper: str | None = None
 
-        self._instance: APIBase[Any] | None = instance
-        self._owner: type[APIBase[Any]] = owner
+        self._instance: BaseAPI[Any] | None = instance
+        self._owner: type[BaseAPI[Any]] = owner
         self._original_func: Callable[..., RestResponse] = endpoint_handler.original_func
         self._use_query_string = endpoint_handler.use_query_string
         self._raw_options = endpoint_handler.default_raw_options
@@ -598,7 +598,7 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
     @staticmethod
     @cache
     def _create(
-        api_class: type[APIBase[Any]], orig_func: Callable[..., Any], async_mode: bool
+        api_class: type[BaseAPI[Any]], orig_func: Callable[..., Any], async_mode: bool
     ) -> type[SyncEndpointFunc[Any]] | type[AsyncEndpointFunc[Any]]:
         """Dynamically create an EndpointFunc class for the given endpoint function"""
         base_class = api_class._async_endpoint_func_class if async_mode else api_class._sync_endpoint_func_class

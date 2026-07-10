@@ -3,10 +3,10 @@ from pathlib import Path
 
 from common_libs.logging import get_logger, setup_logging
 
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints import Endpoint, EndpointFunc, Stats, endpoint
 
-__all__ = ["APIBase", "APIClient", "Endpoint", "EndpointFunc", "Stats", "__version__", "endpoint"]
+__all__ = ["APIClient", "BaseAPI", "Endpoint", "EndpointFunc", "Stats", "__version__", "endpoint"]
 
 try:
     __version__ = version("api-client-core")

@@ -11,7 +11,7 @@ from typing import Any, ParamSpec, TypeVar
 import pytest
 from common_libs.clients.rest_client import RestResponse
 
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 from api_client_core.constants import VALID_METHODS
 from api_client_core.endpoints import AsyncEndpointFunc, EndpointFunc, EndpointHandler, SyncEndpointFunc, endpoint
 
@@ -23,10 +23,10 @@ class TestEndpointHandlerGet:
     """Tests for EndpointHandler.__get__() descriptor protocol"""
 
     @pytest.fixture
-    def api_class(self, api_client: APIClient) -> type[APIBase]:
+    def api_class(self, api_client: APIClient) -> type[BaseAPI]:
         """Returns an API class with one fake endpoint function that doesn't have `@endpoint.<method>` decorator"""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             def get_something(self) -> RestResponse: ...
@@ -36,7 +36,7 @@ class TestEndpointHandlerGet:
     @pytest.mark.parametrize("api_client", ["sync", "async"], indirect=True)
     @pytest.mark.parametrize("with_instance", [True, False])
     def test_returns_endpoint_func_instance(
-        self, api_class: type[APIBase], api_client: APIClient, with_instance: bool
+        self, api_class: type[BaseAPI], api_client: APIClient, with_instance: bool
     ) -> None:
         """Test that __get__() returns an EndpointFunc instance based on the API client's sync/async mode"""
         endpoint_handler = EndpointHandler(api_class.get_something, "get", "/something")
@@ -58,7 +58,7 @@ class TestEndpointHandlerGet:
 
     @pytest.mark.parametrize("with_instance", [True, False])
     def test_caches_endpoint_func_per_key(
-        self, api_class: type[APIBase], api_client: APIClient, with_instance: bool
+        self, api_class: type[BaseAPI], api_client: APIClient, with_instance: bool
     ) -> None:
         """Test that __get__() returns the same cached EndpointFunc on repeated calls with same key"""
         handler = EndpointHandler(api_class.get_something, "get", "/something")
@@ -70,7 +70,7 @@ class TestEndpointHandlerGet:
         assert result1 is result2
 
     @pytest.mark.parametrize("with_instance", [True, False])
-    def test_cache_key(self, api_class: type[APIBase], api_client: APIClient, with_instance: bool) -> None:
+    def test_cache_key(self, api_class: type[BaseAPI], api_client: APIClient, with_instance: bool) -> None:
         """Test that __get__() stores the result in the correct cache location per path.
 
         - Instance path: stored in `instance.__dict__` under the wrapped function's name. The
@@ -88,7 +88,7 @@ class TestEndpointHandlerGet:
             assert api_class in handler._cache
             assert handler._cache[api_class] is endpoint_func
 
-    def test_instance_is_garbage_collectable(self, api_class: type[APIBase], api_client: APIClient) -> None:
+    def test_instance_is_garbage_collectable(self, api_class: type[BaseAPI], api_client: APIClient) -> None:
         """Test that client instances are released after all references are dropped.
 
         Previously the handler's WeakKeyDictionary stored a value that strongly referenced
@@ -106,8 +106,8 @@ class TestEndpointHandlerGet:
         gc.collect()
         assert ref() is None, "Client instance was not released. The handler leaked a strong reference to it"
 
-    def test_non_api_base_owner_raises_not_implemented(self) -> None:
-        """Test that passing a non-APIBase class as owner raises NotImplementedError"""
+    def test_non_base_api_owner_raises_not_implemented(self) -> None:
+        """Test that passing a non-BaseAPI class as owner raises NotImplementedError"""
 
         class NonAPIClass: ...
 
@@ -120,7 +120,7 @@ class TestEndpointHandlerGet:
 
     @pytest.mark.parametrize("with_instance", [True, False])
     def test_endpoint_func_class_name_follows_convention(
-        self, api_class: type[APIBase], api_client: APIClient, with_instance: bool
+        self, api_class: type[BaseAPI], api_client: APIClient, with_instance: bool
     ) -> None:
         """Test that EndpointFunc class name follows <APIClassName><FuncName>EndpointFunc format"""
         handler = EndpointHandler(api_class.get_something, "get", "/something")

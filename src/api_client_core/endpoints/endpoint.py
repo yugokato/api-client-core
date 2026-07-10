@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Generic, ParamSpec
 from ..types import EndpointModel, RestResponse
 
 if TYPE_CHECKING:
-    from ..base.api_class import APIBase, APIClientT
+    from ..base.api_class import APIClientT, BaseAPI
 
 P = ParamSpec("P")
 
@@ -20,7 +20,7 @@ class Endpoint(Generic[P]):
     This is accessible via an EndpointFunc object (see docstrings of the `endpoint` class below).
     """
 
-    api_class: type[APIBase[Any]]
+    api_class: type[BaseAPI[Any]]
     method: str
     path: str
     func_name: str

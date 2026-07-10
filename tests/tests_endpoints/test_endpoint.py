@@ -8,14 +8,14 @@ from httpx import AsyncClient, Client
 from pytest_mock import MockerFixture
 
 from api_client_core import Endpoint, endpoint
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 
 
 class TestEndpointObject:
     """Tests for the Endpoint object attached to EndpointFunc"""
 
     @pytest.mark.parametrize("with_instance", [True, False])
-    def test_attrs(self, api_client: APIClient, api_class: type[APIBase], with_instance: bool) -> None:
+    def test_attrs(self, api_client: APIClient, api_class: type[BaseAPI], with_instance: bool) -> None:
         """Test that Endpoint has correct default field values"""
         if with_instance:
             ep = api_class(api_client).get_something.endpoint
@@ -34,13 +34,13 @@ class TestEndpointObject:
         assert ep.is_documented is True
         assert ep.is_deprecated is False
 
-    def test_str(self, api_class: type[APIBase]) -> None:
+    def test_str(self, api_class: type[BaseAPI]) -> None:
         """Test that Endpoint.__str__ formats the method and path correctly"""
 
         ep = api_class.get_something.endpoint
         assert str(ep) == f"{ep.method.upper()} {ep.path}"
 
-    def test_eq(self, api_class: type[APIBase]) -> None:
+    def test_eq(self, api_class: type[BaseAPI]) -> None:
         """Test that endpoints with the same api_class, method, and path are equal regardless of func_name"""
         ep = api_class.get_something.endpoint
         other = Endpoint(
@@ -52,7 +52,7 @@ class TestEndpointObject:
         )
         assert ep == other
 
-    def test_eq_not_equal(self, api_class: type[APIBase]) -> None:
+    def test_eq_not_equal(self, api_class: type[BaseAPI]) -> None:
         """Test that Endpoint objects with different method or path are not equal"""
         ep = api_class.get_something.endpoint
 
@@ -74,7 +74,7 @@ class TestEndpointObject:
         )
         assert ep != different_method
 
-    def test_hash_is_stable_and_consistent(self, api_class: type[APIBase]) -> None:
+    def test_hash_is_stable_and_consistent(self, api_class: type[BaseAPI]) -> None:
         """Test that Endpoint hash is stable (same value each call) and consistent between equal endpoints"""
         ep = api_class.get_something.endpoint
         other = Endpoint(
@@ -91,13 +91,13 @@ class TestEndpointObject:
     def test_eq_different_api_class_not_equal(self, api_client: APIClient) -> None:
         """Test that endpoints with the same method and path on different API classes are not equal"""
 
-        class API1(APIBase):
+        class API1(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/shared")
             def shared_endpoint(self) -> RestResponse: ...
 
-        class API2(APIBase):
+        class API2(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/shared")
@@ -109,7 +109,7 @@ class TestEndpointObject:
         assert ep1 != ep2
         assert hash(ep1) != hash(ep2)
 
-    def test_is_frozen(self, api_class: type[APIBase]) -> None:
+    def test_is_frozen(self, api_class: type[BaseAPI]) -> None:
         """Test that Endpoint is a frozen dataclass and attributes cannot be modified"""
         ep = api_class.get_something.endpoint
         with pytest.raises(AttributeError, match="cannot assign to field"):
@@ -118,7 +118,7 @@ class TestEndpointObject:
     def test_endpoint_metadata_propagates(self, api_client: APIClient) -> None:
         """Test that endpoint metadata applied on an endpoint function propagates from endpoint handler to Endpoint"""
 
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.undocumented
@@ -141,7 +141,7 @@ class TestEndpointObject:
 
         @endpoint.undocumented
         @endpoint.is_deprecated
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")
@@ -154,7 +154,7 @@ class TestEndpointObject:
         assert ep.is_public is False
         assert ep.is_deprecated is True
 
-    def test_endpoint_call(self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_endpoint_call(self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that Endpoint.__call__ makes the correct HTTP call and returns RestResponse in sync mode"""
         mock_httpx_request = mocker.patch.object(Client, "request")
         ep = api_class.get_something.endpoint
@@ -163,7 +163,7 @@ class TestEndpointObject:
         mock_httpx_request.assert_called_once()
 
     async def test_endpoint_call_async(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that Endpoint.__call__ makes the correct HTTP call and returns RestResponse in async mode"""
         mock_httpx_request = mocker.patch.object(AsyncClient, "request")

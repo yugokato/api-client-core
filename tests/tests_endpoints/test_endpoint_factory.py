@@ -9,7 +9,7 @@ from typing import Any, ParamSpec, TypeVar
 import pytest
 from common_libs.clients.rest_client import RestResponse
 
-from api_client_core.base import APIBase
+from api_client_core.base import BaseAPI
 from api_client_core.constants import VALID_METHODS
 from api_client_core.endpoints import EndpointHandler, endpoint
 from api_client_core.endpoints.endpoint_handler import PendingHandler
@@ -101,7 +101,7 @@ class TestEndpointMetadataDecorators:
         """Test that endpoint.undocumented can be set on the API class level"""
 
         @endpoint.undocumented
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = "test"
 
         assert TestAPI.is_documented is False
@@ -144,7 +144,7 @@ class TestEndpointMetadataDecorators:
         """Test that endpoint.is_deprecated can be set on the class level"""
 
         @endpoint.is_deprecated
-        class TestAPI(APIBase):
+        class TestAPI(BaseAPI):
             app_name = "test"
 
         assert TestAPI.is_deprecated is True
@@ -654,7 +654,7 @@ class TestDecoratorPositionIndependence:
 
 
 class TestUnregisteredDecoratorDetection:
-    """Tests for fail-fast detection of unregistered endpoint decorators in APIBase.__init_subclass__"""
+    """Tests for fail-fast detection of unregistered endpoint decorators in BaseAPI.__init_subclass__"""
 
     @pytest.mark.parametrize("use_wraps", [True, False])
     def test_unregistered_decorator_above_method_decorator_raises(self, use_wraps: bool) -> None:
@@ -670,7 +670,7 @@ class TestUnregisteredDecoratorDetection:
 
         with pytest.raises(RuntimeError, match=r"@endpoint\.decorator"):
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 @regular_decorator
                 @endpoint.get("/v1/something")
                 def do_something(self: Any) -> RestResponse: ...
@@ -687,7 +687,7 @@ class TestUnregisteredDecoratorDetection:
 
         with pytest.raises(RuntimeError, match=r"@endpoint\.decorator"):
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 @regular_decorator
                 @regular_decorator
                 @endpoint.get("/v1/something")
@@ -709,7 +709,7 @@ class TestUnregisteredDecoratorDetection:
         with pytest.raises(RuntimeError, match=r"@endpoint\.decorator"):
             decos = regular_decorator if num_decorators == 1 else lambda f: regular_decorator(regular_decorator(f))
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 @endpoint.is_public
                 @decos
                 @endpoint.get("/v1/something")
@@ -719,7 +719,7 @@ class TestUnregisteredDecoratorDetection:
         """Test that an endpoint decorator stack without @endpoint.<method>() still raises at class-definition time"""
         with pytest.raises(RuntimeError, match=r"@endpoint\.<method>\(\)"):
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 @endpoint.is_public
                 def do_something(self: Any) -> RestResponse: ...
 
@@ -744,7 +744,7 @@ class TestUnregisteredDecoratorDetection:
 
         with pytest.raises(RuntimeError, match=r"configured decorator"):
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 _log = deco_with_callable_arg(my_callback)
 
                 @_log
@@ -773,7 +773,7 @@ class TestUnregisteredDecoratorDetection:
 
         with pytest.raises(RuntimeError, match=r"@endpoint\.decorator"):
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 @regular_decorator
                 @registered_decorator
                 def do_something(self: Any) -> RestResponse: ...
@@ -800,7 +800,7 @@ class TestUnregisteredDecoratorDetection:
 
         with pytest.raises(RuntimeError, match=r"@endpoint\.decorator"):
 
-            class BadAPI(APIBase):
+            class BadAPI(BaseAPI):
                 @registered_decorator
                 @regular_decorator
                 @endpoint.get("/v1/something")
@@ -817,7 +817,7 @@ class TestUnregisteredDecoratorDetection:
 
             return wrapper
 
-        class GoodAPI(APIBase):
+        class GoodAPI(BaseAPI):
             @my_decorator
             @endpoint.get("/v1/something")
             def do_something(self: Any) -> RestResponse: ...
@@ -832,7 +832,7 @@ class TestUnregisteredDecoratorDetection:
 
             return wrapper
 
-        class GoodAPI(APIBase):
+        class GoodAPI(BaseAPI):
             @endpoint.get("/v1/something")
             @regular_decorator
             def do_something(self: Any) -> RestResponse: ...
@@ -840,7 +840,7 @@ class TestUnregisteredDecoratorDetection:
     def test_flag_decorators_and_bare_endpoint_do_not_raise(self) -> None:
         """Test that flag decorators and endpoints without custom decorators do not raise"""
 
-        class GoodAPI(APIBase):
+        class GoodAPI(BaseAPI):
             @endpoint.is_public
             @endpoint.get("/v1/something")
             def with_flags(self: Any) -> RestResponse: ...

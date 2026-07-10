@@ -11,7 +11,7 @@ from .endpoint_func import AsyncEndpointFunc, EndpointFunc, SyncEndpointFunc
 from .utils import endpoint_call as endpoint_call_util
 
 if TYPE_CHECKING:
-    from ..base import APIBase
+    from ..base import BaseAPI
 
 
 __all__ = ["EndpointHandler"]
@@ -72,22 +72,22 @@ class EndpointHandler(Generic[P]):
         self.is_documented = True
         self.is_deprecated = False
         self._lock = RLock()
-        self._cache: WeakKeyDictionary[type[APIBase[Any]], SyncEndpointFunc[P]] = WeakKeyDictionary()
+        self._cache: WeakKeyDictionary[type[BaseAPI[Any]], SyncEndpointFunc[P]] = WeakKeyDictionary()
         self.__decorators: list[EndpointDecorator] = []
 
     def __get__(
-        self, instance: APIBase[Any] | None, owner: type[APIBase[Any]]
+        self, instance: BaseAPI[Any] | None, owner: type[BaseAPI[Any]]
     ) -> SyncEndpointFunc[P] | AsyncEndpointFunc[P]:
         """Return an EndpointFunc object"""
-        from ..base.api_class import APIBase as APIBaseClass
+        from ..base.api_class import BaseAPI as BaseAPIClass
 
-        if not (isinstance(owner, type) and issubclass(owner, APIBaseClass)):
+        if not (isinstance(owner, type) and issubclass(owner, BaseAPIClass)):
             raise NotImplementedError(f"Unsupported API class: {owner}")
 
         with self._lock:
             endpoint_func: SyncEndpointFunc[P] | AsyncEndpointFunc[P] | None
             if instance is None:
-                # Class-level access: used by APIBase.init() to populate endpoints.
+                # Class-level access: used by BaseAPI.init() to populate endpoints.
                 # Cache in a handler-level WeakKeyDictionary keyed by the owner class (always sync).
                 endpoint_func = self._cache.get(owner)
                 if endpoint_func is None:
@@ -114,7 +114,7 @@ class EndpointHandler(Generic[P]):
         self.__decorators.extend(decorators)
 
     def _build_endpoint_func(
-        self, instance: APIBase[Any] | None, owner: type[APIBase[Any]], is_async: bool
+        self, instance: BaseAPI[Any] | None, owner: type[BaseAPI[Any]], is_async: bool
     ) -> SyncEndpointFunc[P] | AsyncEndpointFunc[P]:
         """Create, wrap, and return a new EndpointFunc for the given instance/owner."""
         endpoint_func_class = EndpointFunc._create(owner, self.original_func, is_async)

@@ -21,7 +21,7 @@ from pytest_mock import MockerFixture
 
 import api_client_core.endpoints.endpoint_func as _endpoint_func_module
 import api_client_core.endpoints.utils.endpoint_call as endpoint_call_util
-from api_client_core.base import APIBase, APIClient
+from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints import AsyncEndpointFunc, Stats, SyncEndpointFunc, endpoint
 from api_client_core.endpoints.executors import AsyncExecutor, SyncExecutor
 from api_client_core.endpoints.stats import StatsCollector
@@ -32,7 +32,7 @@ class TestSyncEndpointFuncCall:
     """Tests for SyncEndpointFunc.__call__ sync execution path"""
 
     def test_sync_call_returns_rest_response(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that SyncEndpointFunc.__call__ returns a RestResponse"""
         mock_httpx_request = mocker.patch.object(Client, "request")
@@ -42,7 +42,7 @@ class TestSyncEndpointFuncCall:
         mock_httpx_request.assert_called_once()
 
     def test_sync_call_uses_sync_executor(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that SyncEndpointFunc uses SyncExecutor to execute the HTTP request"""
         mock_httpx_request = mocker.patch.object(Client, "request")
@@ -67,7 +67,7 @@ class TestSyncEndpointFuncCall:
 
         mocker.patch.object(Client, "request", side_effect=mock_httpx_side_effect)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -122,7 +122,7 @@ class TestSyncEndpointFuncCall:
 
             return wrapper
 
-        class SyncHookedAPI(APIBase):
+        class SyncHookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -217,7 +217,7 @@ class TestSyncEndpointFuncCall:
         def record_response(response: RestResponse) -> None:
             call_stack.append("callback")
 
-        class SyncCallbackAPI(APIBase):
+        class SyncCallbackAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")
@@ -238,7 +238,7 @@ class TestSyncEndpointFuncCall:
         f = endpoint_call_util.generate_rest_func_params
         spy_generate = mocker.patch(f"{f.__module__}.{f.__name__}")
 
-        class SyncCustomAPI(APIBase):
+        class SyncCustomAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")
@@ -255,7 +255,7 @@ class TestSyncEndpointFuncCall:
         """Test that a custom sync endpoint body returning a non-RestResponse raises RuntimeError"""
         mocker.patch.object(Client, "request")
 
-        class SyncBadReturnAPI(APIBase):
+        class SyncBadReturnAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")
@@ -267,7 +267,7 @@ class TestSyncEndpointFuncCall:
             instance.get_something()
 
     def test_sync_call_http_error_propagates(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that HTTPError raised during sync execution propagates to the caller"""
         mock_request = mocker.MagicMock(spec=Request)
@@ -287,7 +287,7 @@ class TestSyncEndpointFuncCall:
 
         mocker.patch.object(Client, "request", side_effect=connect_error)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -304,7 +304,7 @@ class TestSyncEndpointFuncCall:
         assert post_hook_called is True
 
     def test_sync_call_works_inside_running_event_loop(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that a sync endpoint call succeeds even when invoked from within a running event loop"""
         mocker.patch.object(Client, "request")
@@ -320,7 +320,7 @@ class TestSyncEndpointFuncCall:
         """Test that a custom sync endpoint body can call another sync endpoint (re-entrant call)"""
         mocker.patch.object(Client, "request")
 
-        class NestedAPI(APIBase):
+        class NestedAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/inner")
@@ -335,7 +335,7 @@ class TestSyncEndpointFuncCall:
         assert isinstance(r, RestResponse)
 
     def test_sync_with_concurrency_makes_multiple_calls(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_concurrency in sync mode issues N concurrent HTTP requests"""
         mock_httpx_request = mocker.patch.object(Client, "request")
@@ -350,7 +350,7 @@ class TestSyncEndpointFuncCall:
         assert mock_httpx_request.call_count == 3
 
     def test_sync_with_concurrency_collects_exceptions_with_return_exceptions(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_concurrency(return_exceptions=True) collects all exceptions instead of propagating"""
         mocker.patch.object(Client, "request", side_effect=ValueError("always fails"))
@@ -363,7 +363,7 @@ class TestSyncEndpointFuncCall:
         assert Client.request.call_count == 3
 
     def test_sync_with_concurrency_propagates_bare_exception(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_concurrency propagates a bare exception (not wrapped) when return_exceptions=False"""
         mocker.patch.object(Client, "request", side_effect=ValueError("always fails"))
@@ -376,7 +376,7 @@ class TestSyncEndpointFuncCall:
         """Test that the sync endpoint call uses the configured endpoint path"""
         mock_httpx_request = mocker.patch.object(Client, "request")
 
-        class PathAPI(APIBase):
+        class PathAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items")
@@ -393,7 +393,7 @@ class TestSyncEndpointFuncCall:
         mocker.patch.object(Client, "request")
         mock_log = mocker.patch.object(endpoint_call_util, "logger")
 
-        class DeprecatedAPI(APIBase):
+        class DeprecatedAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.is_deprecated
@@ -411,7 +411,7 @@ class TestAsyncEndpointFuncCall:
     """Tests for AsyncEndpointFunc.__call__ async execution path"""
 
     async def test_async_call_returns_rest_response(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that AsyncEndpointFunc.__call__ returns a RestResponse when awaited"""
         mocker.patch.object(AsyncClient, "request")
@@ -420,7 +420,7 @@ class TestAsyncEndpointFuncCall:
         assert isinstance(r, RestResponse)
 
     async def test_async_call_uses_async_executor(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that AsyncEndpointFunc uses AsyncExecutor to execute the HTTP request"""
         mock_httpx_request = mocker.patch.object(AsyncClient, "request")
@@ -447,7 +447,7 @@ class TestAsyncEndpointFuncCall:
 
         mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -502,7 +502,7 @@ class TestAsyncEndpointFuncCall:
 
             return wrapper
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -597,7 +597,7 @@ class TestAsyncEndpointFuncCall:
         def record_response(response: RestResponse) -> None:
             call_stack.append("callback")
 
-        class AsyncCallbackAPI(APIBase):
+        class AsyncCallbackAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -618,7 +618,7 @@ class TestAsyncEndpointFuncCall:
         f = endpoint_call_util.generate_rest_func_params
         spy_generate = mocker.patch(f"{f.__module__}.{f.__name__}")
 
-        class AsyncCustomAPI(APIBase):
+        class AsyncCustomAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -637,7 +637,7 @@ class TestAsyncEndpointFuncCall:
         """Test that a custom async endpoint body returning non-RestResponse raises RuntimeError"""
         mocker.patch.object(AsyncClient, "request")
 
-        class AsyncBadReturnAPI(APIBase):
+        class AsyncBadReturnAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -649,7 +649,7 @@ class TestAsyncEndpointFuncCall:
             await instance.get_something()
 
     async def test_async_call_http_error_propagates(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that HTTPError raised during async execution propagates to the caller"""
         mock_request = mocker.MagicMock(spec=Request)
@@ -671,7 +671,7 @@ class TestAsyncEndpointFuncCall:
 
         mocker.patch.object(AsyncClient, "request", side_effect=connect_error)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -688,7 +688,7 @@ class TestAsyncEndpointFuncCall:
         assert post_hook_called is True
 
     async def test_async_with_concurrency_makes_multiple_calls(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that with_concurrency in async mode issues N concurrent HTTP requests via asyncio.gather"""
         mock_httpx_request = mocker.patch.object(AsyncClient, "request")
@@ -703,7 +703,7 @@ class TestAsyncEndpointFuncCall:
         assert mock_httpx_request.call_count == 3
 
     async def test_async_with_concurrency_collects_exceptions_with_return_exceptions(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_concurrency(return_exceptions=True) collects all exceptions instead of propagating"""
         mocker.patch.object(AsyncClient, "request", side_effect=ValueError("always fails"))
@@ -716,7 +716,7 @@ class TestAsyncEndpointFuncCall:
         assert AsyncClient.request.call_count == 3
 
     async def test_async_with_concurrency_propagates_bare_exception(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_concurrency propagates a bare exception when return_exceptions=False.
 
@@ -733,7 +733,7 @@ class TestAsyncEndpointFuncCall:
         """Test that the async endpoint call uses the configured endpoint path"""
         mock_httpx_request = mocker.patch.object(AsyncClient, "request")
 
-        class PathAPI(APIBase):
+        class PathAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/items")
@@ -756,7 +756,7 @@ class TestAsyncDefEndpointFuncCall:
         mocker.patch.object(AsyncClient, "request")
         spy_generate = mocker.spy(endpoint_call_util, "generate_rest_func_params")
 
-        class AsyncDefEmptyBodyAPI(APIBase):
+        class AsyncDefEmptyBodyAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -783,7 +783,7 @@ class TestAsyncDefEndpointFuncCall:
         f = endpoint_call_util.generate_rest_func_params
         spy_generate = mocker.patch(f"{f.__module__}.{f.__name__}")
 
-        class AsyncDefCustomBodyAPI(APIBase):
+        class AsyncDefCustomBodyAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -805,7 +805,7 @@ class TestAsyncDefEndpointFuncCall:
         """Test that an `async def` endpoint body composes with a chainable `with_xxx()` wrapper"""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
 
-        class AsyncDefWrappedBodyAPI(APIBase):
+        class AsyncDefWrappedBodyAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -831,7 +831,7 @@ class TestAsyncDefEndpointFuncCall:
 
         mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
 
-        class AsyncDefPathParamAPI(APIBase):
+        class AsyncDefPathParamAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/users/{username}")
@@ -854,7 +854,7 @@ class TestAsyncDefEndpointFuncCall:
         """Test that an `async def` endpoint body returning a non-RestResponse raises RuntimeError"""
         mocker.patch.object(AsyncClient, "request")
 
-        class AsyncDefBadReturnAPI(APIBase):
+        class AsyncDefBadReturnAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -878,7 +878,7 @@ class TestAsyncDefEndpointFuncCall:
 
         mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class AsyncDefStreamAPI(APIBase):
+        class AsyncDefStreamAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/something")
@@ -912,7 +912,7 @@ class TestAsyncDefHooks:
 
         mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -945,7 +945,7 @@ class TestAsyncDefHooks:
 
         mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -969,7 +969,7 @@ class TestAsyncDefHooks:
         """Test that an AssertionError raised inside an `async def` post_request_hook propagates"""
         mocker.patch.object(AsyncClient, "request")
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -989,7 +989,7 @@ class TestAsyncDefHooks:
         mocker.patch.object(AsyncClient, "request")
         mock_log = mocker.patch.object(_endpoint_func_module, "logger")
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1018,7 +1018,7 @@ class TestAsyncDefHooks:
 
         mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1044,7 +1044,7 @@ class TestAsyncOnlyRejectedOnSyncClient:
         """Test that calling an `async def` endpoint on a sync client raises RuntimeError"""
         mocker.patch.object(Client, "request")
 
-        class AsyncOnlyAPI(APIBase):
+        class AsyncOnlyAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")
@@ -1060,7 +1060,7 @@ class TestAsyncOnlyRejectedOnSyncClient:
         """Test that streaming an `async def` endpoint on a sync client raises RuntimeError"""
         mocker.patch.object(Client, "request")
 
-        class AsyncOnlyAPI(APIBase):
+        class AsyncOnlyAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/something")
@@ -1077,7 +1077,7 @@ class TestAsyncOnlyRejectedOnSyncClient:
         """Test that an `async def` pre_request_hook on a sync client raises RuntimeError"""
         mocker.patch.object(Client, "request")
 
-        class AsyncHookAPI(APIBase):
+        class AsyncHookAPI(BaseAPI):
             app_name = api_client.app_name
 
             async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1097,7 +1097,7 @@ class TestAsyncOnlyRejectedOnSyncClient:
         with_hooks=False, since the rejection does not depend on hook execution"""
         mocker.patch.object(Client, "request")
 
-        class AsyncHookAPI(APIBase):
+        class AsyncHookAPI(BaseAPI):
             app_name = api_client.app_name
 
             async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1116,7 +1116,7 @@ class TestAsyncOnlyRejectedOnSyncClient:
         """Test that an `async def` post_request_hook on a sync client raises RuntimeError"""
         mocker.patch.object(Client, "request")
 
-        class AsyncHookAPI(APIBase):
+        class AsyncHookAPI(BaseAPI):
             app_name = api_client.app_name
 
             async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1134,7 +1134,7 @@ class TestSyncEndpointFuncStreamCall:
     """Tests for SyncEndpointFunc.stream()"""
 
     def test_sync_stream_yields_rest_response(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that stream() context manager yields a RestResponse"""
         mock_resp = _make_stream_response()
@@ -1161,7 +1161,7 @@ class TestSyncEndpointFuncStreamCall:
         mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
         mock_log = mocker.patch.object(endpoint_call_util, "logger")
 
-        class DeprecatedAPI(APIBase):
+        class DeprecatedAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.is_deprecated
@@ -1176,7 +1176,7 @@ class TestSyncEndpointFuncStreamCall:
         assert any("DEPRECATED" in msg for msg in warning_messages)
 
     def test_sync_stream_http_error_propagates(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that an HTTPError raised inside stream() propagates to the caller"""
         mock_request = mocker.MagicMock(spec=Request)
@@ -1207,7 +1207,7 @@ class TestSyncEndpointFuncStreamCall:
 
         mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1236,7 +1236,7 @@ class TestSyncEndpointFuncStreamCall:
 
         mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1269,7 +1269,7 @@ class TestSyncEndpointFuncStreamCall:
 
         mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1297,7 +1297,7 @@ class TestSyncEndpointFuncStreamCall:
 
         mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class HookedAPI(APIBase):
+        class HookedAPI(BaseAPI):
             app_name = api_client.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1325,7 +1325,7 @@ class TestSyncEndpointFuncStreamCall:
 
         mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class DefaultsAPI(APIBase):
+        class DefaultsAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items")
@@ -1367,7 +1367,7 @@ class TestAsyncEndpointFuncStreamCall:
     """Tests for AsyncEndpointFunc.stream()"""
 
     async def test_async_stream_yields_rest_response(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async stream() context manager yields a RestResponse"""
         mock_resp = _make_stream_response()
@@ -1382,7 +1382,7 @@ class TestAsyncEndpointFuncStreamCall:
             assert r is mock_resp
 
     async def test_async_stream_http_error_propagates(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that an HTTPError raised inside async stream() propagates to the caller"""
         mock_request = mocker.MagicMock(spec=Request)
@@ -1415,7 +1415,7 @@ class TestAsyncEndpointFuncStreamCall:
 
         mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1444,7 +1444,7 @@ class TestAsyncEndpointFuncStreamCall:
 
         mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
 
-        class AsyncHookedAPI(APIBase):
+        class AsyncHookedAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
@@ -1470,7 +1470,7 @@ class TestEndpointFuncCallWithLock:
     """Tests for EndpointFunc.with_lock()"""
 
     def test_auto_lock_name_uses_app_class_and_func_name(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_lock auto-generates a lock name as '{app_name}-{APIClass}.{func_name}'"""
         mocker.patch.object(Client, "request")
@@ -1485,7 +1485,7 @@ class TestEndpointFuncCallWithLock:
         mock_lock.assert_called_once_with(expected_lock_name)
 
     def test_explicit_lock_name_overrides_auto_name(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that explicitly providing lock_name overrides the auto-generated name"""
         mocker.patch.object(Client, "request")
@@ -1499,7 +1499,7 @@ class TestEndpointFuncCallWithLock:
         mock_lock.assert_called_once_with("my-custom-lock")
 
     def test_lock_is_entered_and_exited_around_request(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that the Lock context manager is entered before and exited after the request"""
         call_order: list[str] = []
@@ -1530,7 +1530,7 @@ class TestEndpointFuncCallWithLock:
         assert call_order == ["lock_enter", "request", "lock_exit"]
 
     async def test_lock_is_held_across_awaited_request_async(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that in async mode the Lock context manager is entered before and exited after the awaited request"""
         call_order: list[str] = []
@@ -1561,7 +1561,7 @@ class TestEndpointFuncCallWithLock:
         assert call_order == ["lock_enter", "request", "lock_exit"]
 
     def test_with_lock_returns_rest_response(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_lock returns a RestResponse"""
         mocker.patch.object(Client, "request")
@@ -1574,7 +1574,7 @@ class TestEndpointFuncCallWithLock:
         assert isinstance(r, RestResponse)
 
     async def test_lock_is_released_after_async_call(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that the distributed lock is fully released after an awaited with_lock() call.
 
@@ -1610,7 +1610,7 @@ class TestEndpointFuncCallWithRetrySync:
     """Tests for SyncEndpointFunc.with_retry()"""
 
     def test_no_retry_when_condition_not_met(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry does not retry when the condition is not satisfied"""
         mock_request = mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -1620,7 +1620,7 @@ class TestEndpointFuncCallWithRetrySync:
         assert mock_request.call_count == 1
 
     def test_retry_on_matching_status_code(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry retries when the response matches the given status code"""
         mocker.patch.object(
@@ -1634,7 +1634,7 @@ class TestEndpointFuncCallWithRetrySync:
         assert r.status_code == 200
 
     def test_retry_on_callable_condition(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry accepts a callable condition and retries when it returns True"""
         mocker.patch.object(
@@ -1650,7 +1650,7 @@ class TestEndpointFuncCallWithRetrySync:
         assert r.status_code == 200
 
     def test_retry_exhausts_up_to_num_retries(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry stops after num_retries retries even if condition keeps matching"""
         # 1 initial call + 2 retries = 3 total calls
@@ -1673,7 +1673,7 @@ class TestEndpointFuncCallWithRetrySync:
     def test_retry_passes_original_args_and_kwargs(self, mocker: MockerFixture, api_client: APIClient) -> None:
         """Test that with_retry forwards the original call args/kwargs to each retry"""
 
-        class PathAPI(APIBase):
+        class PathAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items/{item_id}")
@@ -1693,7 +1693,7 @@ class TestEndpointFuncCallWithRetrySync:
             assert "42" in str(call)
 
     def test_retry_passes_correct_kwargs_to_retry_on(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry passes the correct keyword arguments to retry_on"""
         mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
@@ -1714,7 +1714,7 @@ class TestEndpointFuncCallWithRetrySync:
         )
 
     def test_safe_methods_only_is_forwarded_to_retry_on(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True is forwarded to retry_on"""
         mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
@@ -1738,7 +1738,7 @@ class TestEndpointFuncCallWithRetryAsync:
     """Tests for AsyncEndpointFunc.with_retry()"""
 
     async def test_no_retry_when_condition_not_met(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_retry does not retry when the condition is not satisfied"""
         mock_request = mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -1748,7 +1748,7 @@ class TestEndpointFuncCallWithRetryAsync:
         assert mock_request.call_count == 1
 
     async def test_retry_on_matching_status_code(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_retry retries when the response matches the given status code"""
         mocker.patch.object(
@@ -1762,7 +1762,7 @@ class TestEndpointFuncCallWithRetryAsync:
         assert r.status_code == 200
 
     async def test_retry_passes_correct_kwargs_to_retry_on(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_retry passes async_mode=True to retry_on"""
         mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
@@ -1782,7 +1782,7 @@ class TestEndpointFuncCallWithRetryAsync:
         )
 
     async def test_safe_methods_only_is_forwarded_to_retry_on(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True is forwarded to retry_on"""
         mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
@@ -1806,7 +1806,7 @@ class TestEndpointFuncCallWithRetryOnException:
     """Tests for with_retry() using exception classes as the condition"""
 
     def test_sync_retry_on_matching_exception_class(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry retries when the raised exception matches the condition class"""
         call_count = 0
@@ -1825,7 +1825,7 @@ class TestEndpointFuncCallWithRetryOnException:
         assert call_count == 2
 
     def test_sync_no_retry_on_non_matching_exception_class(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry does not retry when the raised exception does not match the condition class"""
         mocker.patch.object(Client, "request", side_effect=TypeError("unexpected type"))
@@ -1834,7 +1834,7 @@ class TestEndpointFuncCallWithRetryOnException:
             instance.get_something.with_retry(condition=ValueError, num_retries=1, retry_after=0)()
 
     def test_sync_retry_on_tuple_of_exception_classes(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry retries when the raised exception matches any class in a tuple condition"""
         call_count = 0
@@ -1853,7 +1853,7 @@ class TestEndpointFuncCallWithRetryOnException:
         assert call_count == 2
 
     def test_sync_retry_exhausts_up_to_num_retries_on_exception(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry stops after num_retries retries even if the exception keeps being raised"""
         mocker.patch.object(Client, "request", side_effect=ValueError("always fails"))
@@ -1868,7 +1868,7 @@ class TestEndpointFuncCallWithRetryOnException:
     ) -> None:
         """Test that safe_methods_only=True skips retry when the endpoint uses a non-safe HTTP method"""
 
-        class PostAPI(APIBase):
+        class PostAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.post("/v1/something")
@@ -1885,7 +1885,7 @@ class TestEndpointFuncCallWithRetryOnException:
         assert Client.request.call_count == 1
 
     def test_sync_safe_methods_only_retries_for_safe_method(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True still retries when the endpoint uses a safe HTTP method (GET)"""
         call_count = 0
@@ -1906,7 +1906,7 @@ class TestEndpointFuncCallWithRetryOnException:
         assert call_count == 2
 
     async def test_async_retry_on_matching_exception_class(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_retry retries when the raised exception matches the condition class"""
         call_count = 0
@@ -1929,7 +1929,7 @@ class TestEndpointFuncCallWithRetryOnException:
     ) -> None:
         """Test that in async mode safe_methods_only=True skips retry for non-safe HTTP methods"""
 
-        class PostAPI(APIBase):
+        class PostAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.post("/v1/something")
@@ -1948,7 +1948,7 @@ class TestEndpointFuncCallWithRetryOnException:
         assert AsyncClient.request.call_count == 1
 
     async def test_async_safe_methods_only_retries_for_safe_method(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that in async mode safe_methods_only=True still retries for safe HTTP methods (GET)"""
         call_count = 0
@@ -1973,7 +1973,7 @@ class TestEndpointFuncCallWithExpectedStatus:
     """Tests for EndpointFunc.with_expected_status()"""
 
     def test_sync_passes_through_when_status_matches(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status returns the RestResponse when the status code matches"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -1983,7 +1983,7 @@ class TestEndpointFuncCallWithExpectedStatus:
         assert r.status_code == 200
 
     def test_sync_raises_assertion_when_status_does_not_match(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status raises AssertionError when the status code does not match"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
@@ -1992,7 +1992,7 @@ class TestEndpointFuncCallWithExpectedStatus:
             instance.get_something.with_expected_status(200)()
 
     def test_sync_accepts_multiple_expected_statuses(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status accepts multiple codes and passes when any one matches"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(201, mocker))
@@ -2002,7 +2002,7 @@ class TestEndpointFuncCallWithExpectedStatus:
         assert r.status_code == 201
 
     def test_sync_raises_when_none_of_multiple_statuses_match(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status raises AssertionError when none of the expected codes match"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(400, mocker))
@@ -2011,7 +2011,7 @@ class TestEndpointFuncCallWithExpectedStatus:
             instance.get_something.with_expected_status(200, 201)()
 
     def test_sync_useful_for_negative_test_scenarios(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status can assert on error status codes for negative test scenarios"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(400, mocker))
@@ -2021,7 +2021,7 @@ class TestEndpointFuncCallWithExpectedStatus:
         assert r.status_code == 400
 
     def test_raises_value_error_when_called_with_no_statuses(
-        self, api_client: APIClient, api_class: type[APIBase]
+        self, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status raises ValueError immediately when given no status codes"""
         instance = api_class(api_client)
@@ -2029,7 +2029,7 @@ class TestEndpointFuncCallWithExpectedStatus:
             instance.get_something.with_expected_status()
 
     async def test_async_passes_through_when_status_matches(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_expected_status returns the RestResponse when the status code matches"""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -2039,7 +2039,7 @@ class TestEndpointFuncCallWithExpectedStatus:
         assert r.status_code == 200
 
     async def test_async_raises_assertion_when_status_does_not_match(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_expected_status raises AssertionError when the status code does not match"""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(404, mocker))
@@ -2052,7 +2052,7 @@ class TestEndpointFuncCallWithMaxResponseTime:
     """Tests for EndpointFunc.with_max_response_time()"""
 
     def test_sync_passes_when_response_time_is_within_limit(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_max_response_time returns the response when the response time is within the limit"""
         resp = _make_httpx_response(200, mocker)
@@ -2063,7 +2063,7 @@ class TestEndpointFuncCallWithMaxResponseTime:
         assert isinstance(r, RestResponse)
 
     def test_sync_raises_assertion_when_response_time_exceeds_limit(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_max_response_time raises AssertionError when the response time exceeds the limit"""
         resp = _make_httpx_response(200, mocker)
@@ -2074,7 +2074,7 @@ class TestEndpointFuncCallWithMaxResponseTime:
             instance.get_something.with_max_response_time(100)()
 
     def test_sync_passes_when_response_time_equals_limit(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_max_response_time passes when response time exactly equals the limit (boundary: > not >=)"""
         resp = _make_httpx_response(200, mocker)
@@ -2085,7 +2085,7 @@ class TestEndpointFuncCallWithMaxResponseTime:
         assert isinstance(r, RestResponse)
 
     async def test_async_passes_when_response_time_is_within_limit(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_max_response_time returns the response when the response time is within the limit"""
         resp = _make_httpx_response(200, mocker)
@@ -2096,7 +2096,7 @@ class TestEndpointFuncCallWithMaxResponseTime:
         assert isinstance(r, RestResponse)
 
     async def test_async_raises_assertion_when_response_time_exceeds_limit(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_max_response_time raises AssertionError when the response time exceeds the limit"""
         resp = _make_httpx_response(200, mocker)
@@ -2111,7 +2111,7 @@ class TestEndpointFuncCallWithPolling:
     """Tests for EndpointFunc.with_polling()"""
 
     def test_sync_returns_immediately_when_condition_met_on_first_call(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_polling returns on the first call when until() is immediately True"""
         mock_request = mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -2122,7 +2122,7 @@ class TestEndpointFuncCallWithPolling:
         assert mock_request.call_count == 1
 
     def test_sync_polls_until_condition_is_met(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_polling keeps calling the endpoint until until() returns True"""
         # First two calls return 202 (condition False). Third returns 200 (condition True)
@@ -2149,7 +2149,7 @@ class TestEndpointFuncCallWithPolling:
         mock_time.sleep.assert_called_with(0.5)
 
     def test_sync_raises_timeout_when_condition_never_met(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_polling raises TimeoutError when the condition is never satisfied within timeout"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(202, mocker))
@@ -2162,7 +2162,7 @@ class TestEndpointFuncCallWithPolling:
             instance.get_something.with_polling(until=lambda resp: resp.status_code == 200, interval=0.1, timeout=5)()
 
     def test_sync_endpoint_is_always_called_at_least_once(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_polling always makes at least one request even with a very short timeout"""
         mock_request = mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -2172,7 +2172,7 @@ class TestEndpointFuncCallWithPolling:
         assert mock_request.call_count == 1
 
     def test_sync_polling_does_not_timeout_early(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_polling() does not raise TimeoutError before the deadline when interval > timeout"""
         mocker.patch.object(Client, "request")
@@ -2201,7 +2201,7 @@ class TestEndpointFuncCallWithPolling:
         assert slept < 10
 
     async def test_async_returns_immediately_when_condition_met_on_first_call(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_polling returns on the first call when until() is immediately True"""
         mock_request = mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -2211,7 +2211,7 @@ class TestEndpointFuncCallWithPolling:
         assert mock_request.call_count == 1
 
     async def test_async_polls_until_condition_is_met(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_polling keeps calling the endpoint until until() returns True"""
         mocker.patch.object(
@@ -2240,7 +2240,7 @@ class TestEndpointFuncCallWithPolling:
         mock_sleep.assert_called_with(0.5)
 
     async def test_async_raises_timeout_when_condition_never_met(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_polling raises TimeoutError when the condition is never satisfied within timeout"""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(202, mocker))
@@ -2260,7 +2260,7 @@ class TestEndpointFuncCallWithChaining:
     """Tests for chaining multiple with_xxx() wrappers"""
 
     def test_sync_with_lock_then_with_retry(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_lock().with_retry() acquires the lock AND retries on the given condition.
 
@@ -2285,7 +2285,7 @@ class TestEndpointFuncCallWithChaining:
         assert mock_lock.call_count == 1
 
     def test_sync_with_retry_then_with_lock(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry().with_lock() acquires the lock AND retries on the given condition.
 
@@ -2310,7 +2310,7 @@ class TestEndpointFuncCallWithChaining:
         assert mock_lock.call_count == 2
 
     async def test_async_with_lock_then_with_retry(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_lock().with_retry() acquires the lock AND retries on the given condition.
 
@@ -2333,7 +2333,7 @@ class TestEndpointFuncCallWithChaining:
         assert mock_lock.call_count == 1
 
     def test_sync_with_expected_status_then_with_retry(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_expected_status().with_retry() asserts on the final response after retries.
 
@@ -2352,7 +2352,7 @@ class TestEndpointFuncCallWithChaining:
         assert r.status_code == 200
 
     def test_sync_with_polling_then_with_expected_status(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_polling().with_expected_status() applies status assertion on each polled response.
 
@@ -2367,14 +2367,14 @@ class TestEndpointFuncCallWithChaining:
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
-    def test_sync_terminal_wrapper_in_the_middle_raises(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_sync_terminal_wrapper_in_the_middle_raises(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that chaining any wrapper after a terminal one raises TypeError at chain-build time."""
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_concurrency().with_retry()
 
     def test_sync_terminal_wrapper_after_another_terminal_raises(
-        self, api_client: APIClient, api_class: type[APIBase]
+        self, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that chaining a second terminal wrapper after the first raises TypeError."""
         instance = api_class(api_client)
@@ -2382,7 +2382,7 @@ class TestEndpointFuncCallWithChaining:
             instance.get_something.with_concurrency().with_repeat()
 
     def test_sync_repeat_terminal_wrapper_in_the_middle_raises(
-        self, api_client: APIClient, api_class: type[APIBase]
+        self, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that chaining any wrapper after with_repeat() raises TypeError."""
         instance = api_class(api_client)
@@ -2390,7 +2390,7 @@ class TestEndpointFuncCallWithChaining:
             instance.get_something.with_repeat().with_expected_status(200)
 
     async def test_async_terminal_wrapper_in_the_middle_raises(
-        self, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that chaining any wrapper after a terminal one raises TypeError in async mode."""
         instance = api_class_async(api_client_async)
@@ -2402,7 +2402,7 @@ class TestEndpointFuncCallWithRepeat:
     """Tests for with_repeat() — sequential repeated calls that collect all results"""
 
     def test_sync_with_repeat_returns_all_responses_on_success(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_repeat in sync mode fires N sequential calls and returns all responses"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -2417,7 +2417,7 @@ class TestEndpointFuncCallWithRepeat:
         assert Client.request.call_count == 3
 
     def test_sync_with_repeat_collects_exceptions_without_propagating(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_repeat collects raised exceptions in-order without stopping the loop"""
         mocker.patch.object(
@@ -2442,7 +2442,7 @@ class TestEndpointFuncCallWithRepeat:
         assert Client.request.call_count == 3
 
     def test_sync_with_repeat_collects_all_exceptions(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_repeat collects all failures when every call raises"""
         num = 3
@@ -2456,7 +2456,7 @@ class TestEndpointFuncCallWithRepeat:
         assert Client.request.call_count == num
 
     def test_sync_with_repeat_propagates_exception_by_default(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_repeat propagates exceptions and stops on first failure by default"""
         mocker.patch.object(
@@ -2477,7 +2477,7 @@ class TestEndpointFuncCallWithRepeat:
         assert Client.request.call_count == 2
 
     def test_sync_with_repeat_default_num(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_repeat() uses the default of 2 calls when num is not specified"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -2489,7 +2489,7 @@ class TestEndpointFuncCallWithRepeat:
         assert Client.request.call_count == 2
 
     async def test_async_with_repeat_returns_all_responses_on_success(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that with_repeat in async mode fires N sequential calls and returns all responses"""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -2504,7 +2504,7 @@ class TestEndpointFuncCallWithRepeat:
         assert AsyncClient.request.call_count == 3
 
     async def test_async_with_repeat_collects_exceptions_without_propagating(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_repeat collects raised exceptions in-order without stopping the loop"""
         mocker.patch.object(
@@ -2529,7 +2529,7 @@ class TestEndpointFuncCallWithRepeat:
         assert AsyncClient.request.call_count == 3
 
     async def test_async_with_repeat_collects_all_exceptions(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_repeat collects all failures when every call raises"""
         num = 3
@@ -2543,7 +2543,7 @@ class TestEndpointFuncCallWithRepeat:
         assert AsyncClient.request.call_count == num
 
     async def test_async_with_repeat_propagates_exception_by_default(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_repeat propagates exceptions and stops on first failure by default"""
         mocker.patch.object(
@@ -2564,7 +2564,7 @@ class TestEndpointFuncCallWithRepeat:
         assert AsyncClient.request.call_count == 2
 
     async def test_async_with_repeat_default_num(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_repeat() uses the default of 2 calls when num is not specified"""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -2592,7 +2592,7 @@ class TestEndpointFuncCallWithStats:
         self,
         mocker: MockerFixture,
         api_client: APIClient,
-        api_class: type[APIBase],
+        api_class: type[BaseAPI],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that with_stats() returns a RestResponse and prints a stats report without the Endpoint column."""
@@ -2612,7 +2612,7 @@ class TestEndpointFuncCallWithStats:
         self,
         mocker: MockerFixture,
         api_client: APIClient,
-        api_class: type[APIBase],
+        api_class: type[BaseAPI],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that with_stats() prints the stats report even when the call raises an exception."""
@@ -2630,7 +2630,7 @@ class TestEndpointFuncCallWithStats:
         self,
         mocker: MockerFixture,
         api_client: APIClient,
-        api_class: type[APIBase],
+        api_class: type[BaseAPI],
     ) -> None:
         """Test that a failure in the report printing neither masks the call's exception nor breaks its result."""
         mocker.patch.object(StatsCollector, "show", side_effect=RuntimeError("simulated show failure"))
@@ -2648,7 +2648,7 @@ class TestEndpointFuncCallWithStats:
         self,
         mocker: MockerFixture,
         api_client: APIClient,
-        api_class: type[APIBase],
+        api_class: type[BaseAPI],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that with_stats().with_concurrency() aggregates all concurrent calls in the report."""
@@ -2671,7 +2671,7 @@ class TestEndpointFuncCallWithStats:
         self,
         mocker: MockerFixture,
         api_client_async: APIClient,
-        api_class_async: type[APIBase],
+        api_class_async: type[BaseAPI],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that async with_stats() returns a RestResponse and prints a stats report without the Endpoint column."""
@@ -2691,7 +2691,7 @@ class TestEndpointFuncCallWithStats:
         self,
         mocker: MockerFixture,
         api_client_async: APIClient,
-        api_class_async: type[APIBase],
+        api_class_async: type[BaseAPI],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that async with_stats().with_concurrency() aggregates all concurrent calls in the report."""
@@ -2715,7 +2715,7 @@ class TestEndpointFuncCallRaiseOnError:
     """Tests for APIClient.raise_on_error flag and its interaction with the request lifecycle"""
 
     def test_sync_non_2xx_raises_http_status_error_when_flag_enabled(
-        self, mocker: MockerFixture, api_class: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that a non-2xx response raises HTTPStatusError when raise_on_error=True"""
         client = api_client_factory(raise_on_error=True)
@@ -2726,7 +2726,7 @@ class TestEndpointFuncCallRaiseOnError:
             instance.get_something()
 
     def test_sync_2xx_does_not_raise_when_flag_enabled(
-        self, mocker: MockerFixture, api_class: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that a 2xx response does not raise even when raise_on_error=True"""
         client = api_client_factory(raise_on_error=True)
@@ -2738,7 +2738,7 @@ class TestEndpointFuncCallRaiseOnError:
         assert r.status_code == 200
 
     def test_sync_non_2xx_does_not_raise_when_flag_disabled(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that a non-2xx response is returned normally when raise_on_error=False (default)"""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
@@ -2749,7 +2749,7 @@ class TestEndpointFuncCallRaiseOnError:
         assert r.status_code == 404
 
     def test_sync_raise_on_error_does_not_prevent_retry_from_seeing_responses(
-        self, mocker: MockerFixture, api_class: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that raise_on_error=True with with_retry still retries on matching responses.
 
@@ -2771,7 +2771,7 @@ class TestEndpointFuncCallRaiseOnError:
         assert Client.request.call_count == 2
 
     def test_sync_raise_on_error_raises_after_all_retries_exhausted(
-        self, mocker: MockerFixture, api_class: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that raise_on_error=True raises only after retries are exhausted"""
         client = api_client_factory(raise_on_error=True)
@@ -2791,7 +2791,7 @@ class TestEndpointFuncCallRaiseOnError:
         assert Client.request.call_count == 2
 
     async def test_async_non_2xx_raises_http_status_error_when_flag_enabled(
-        self, mocker: MockerFixture, api_class_async: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class_async: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that async mode non-2xx raises HTTPStatusError when raise_on_error=True"""
         client = api_client_factory(async_mode=True, raise_on_error=True)
@@ -2802,7 +2802,7 @@ class TestEndpointFuncCallRaiseOnError:
             await instance.get_something()
 
     async def test_async_raise_on_error_does_not_prevent_retry_from_seeing_responses(
-        self, mocker: MockerFixture, api_class_async: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class_async: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that async raise_on_error=True with with_retry still retries on matching responses"""
         client = api_client_factory(async_mode=True, raise_on_error=True)
@@ -2826,7 +2826,7 @@ class TestEndpointFuncCallWithPagination:
     def test_sync_multi_page_yields_all_responses(self, mocker: MockerFixture, api_client: APIClient) -> None:
         """Test that sync with_pagination yields one RestResponse per page until get_next returns None."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items")
@@ -2858,7 +2858,7 @@ class TestEndpointFuncCallWithPagination:
     ) -> None:
         """Test that async with_pagination yields one RestResponse per page until get_next returns None."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/items")
@@ -2886,7 +2886,7 @@ class TestEndpointFuncCallWithPagination:
         assert AsyncClient.request.call_count == 3
 
     def test_sync_single_page_stops_when_get_next_returns_none(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that sync with_pagination stops after the first page when get_next returns None."""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -2899,7 +2899,7 @@ class TestEndpointFuncCallWithPagination:
         assert Client.request.call_count == 1
 
     async def test_async_single_page_stops_when_get_next_returns_none(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_pagination stops after the first page when get_next returns None."""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -2912,7 +2912,7 @@ class TestEndpointFuncCallWithPagination:
         assert AsyncClient.request.call_count == 1
 
     def test_sync_empty_dict_continues_without_new_params(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that returning {} from get_next continues pagination without adding new params."""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -2926,7 +2926,7 @@ class TestEndpointFuncCallWithPagination:
     def test_sync_limit_caps_the_number_of_pages(self, mocker: MockerFixture, api_client: APIClient) -> None:
         """Test that limit stops pagination regardless of what get_next returns."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items")
@@ -2945,7 +2945,7 @@ class TestEndpointFuncCallWithPagination:
     ) -> None:
         """Test that async limit stops pagination regardless of what get_next returns."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/items")
@@ -2964,7 +2964,7 @@ class TestEndpointFuncCallWithPagination:
     ) -> None:
         """Test that the params returned by get_next are passed as query params to the next request."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items")
@@ -2997,7 +2997,7 @@ class TestEndpointFuncCallWithPagination:
     ) -> None:
         """Test that with_retry().with_pagination() retries each page independently inside the loop."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client.app_name
 
             @endpoint.get("/v1/items")
@@ -3027,7 +3027,7 @@ class TestEndpointFuncCallWithPagination:
         assert Client.request.call_count == 3  # 2 attempts for page 1 + 1 for page 2
 
     def test_sync_raise_on_error_applies_per_page_inside_pagination_loop(
-        self, mocker: MockerFixture, api_class: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that raise_on_error=True raises on the failing page and not on prior successful pages."""
         client = api_client_factory(raise_on_error=True)
@@ -3054,7 +3054,7 @@ class TestEndpointFuncCallWithPagination:
     ) -> None:
         """Test that async with_retry().with_pagination() retries each page independently inside the loop."""
 
-        class PaginatedListAPI(APIBase):
+        class PaginatedListAPI(BaseAPI):
             app_name = api_client_async.app_name
 
             @endpoint.get("/v1/items")
@@ -3087,7 +3087,7 @@ class TestEndpointFuncCallWithPagination:
         assert AsyncClient.request.call_count == 3  # 2 attempts for page 1 + 1 for page 2
 
     async def test_async_raise_on_error_applies_per_page_inside_pagination_loop(
-        self, mocker: MockerFixture, api_class_async: type[APIBase], api_client_factory: Any
+        self, mocker: MockerFixture, api_class_async: type[BaseAPI], api_client_factory: Any
     ) -> None:
         """Test that async raise_on_error=True raises on the failing page and not on prior successful pages."""
         client = api_client_factory(async_mode=True, raise_on_error=True)
@@ -3110,7 +3110,7 @@ class TestEndpointFuncCallWithPagination:
             await paginator.__anext__()
 
     def test_sync_pagination_is_lazy(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[APIBase]
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that calling the paginator does not make any request until the first iteration step."""
         mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
@@ -3123,7 +3123,7 @@ class TestEndpointFuncCallWithPagination:
         assert Client.request.call_count == 1
 
     async def test_async_pagination_is_lazy(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[APIBase]
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that calling the async paginator does not make any request until the first iteration step."""
         mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
@@ -3135,7 +3135,7 @@ class TestEndpointFuncCallWithPagination:
         await paginator.__anext__()
         assert AsyncClient.request.call_count == 1
 
-    def test_limit_below_one_raises(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_limit_below_one_raises(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that limit values below 1 raise a ValueError."""
         instance = api_class(api_client)
         with pytest.raises(ValueError, match="limit"):
@@ -3143,13 +3143,13 @@ class TestEndpointFuncCallWithPagination:
         with pytest.raises(ValueError, match="limit"):
             instance.get_something.with_pagination(lambda r: None, limit=-1)
 
-    def test_sync_terminal_before_pagination_raises(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_sync_terminal_before_pagination_raises(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that chaining with_pagination after a terminal wrapper raises RuntimeError."""
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_repeat().with_pagination(lambda r: None)
 
-    def test_sync_pagination_is_terminal(self, api_client: APIClient, api_class: type[APIBase]) -> None:
+    def test_sync_pagination_is_terminal(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that with_pagination itself is terminal — further chaining raises RuntimeError."""
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):

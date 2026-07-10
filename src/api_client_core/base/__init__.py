@@ -1,2 +1,2 @@
-from .api_class import APIBase
+from .api_class import BaseAPI
 from .api_client import APIClient
