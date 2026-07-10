@@ -24,6 +24,7 @@ The framework uses the `httpx`-based REST client from [common-libs](https://gith
   - [Endpoint Object (`Endpoint`)](#endpoint-object-endpoint)
   - [API Statistics (`Stats`)](#api-statistics-stats)
   - [Automatic Discovery (`APIBase.init()`)](#automatic-discovery-apibaseinit)
+- [Sync vs Async](#sync-vs-async)
 - [Type and Response Reference](#type-and-response-reference)
 - [Extending Core](#extending-core)
 
@@ -64,15 +65,37 @@ class UsersAPI(APIBase):
         ...
 ```
 
-Call it like a regular Python method through your [API client](#building-an-api-client). The framework automatically builds and sends the HTTP request using the provided arguments and returns a `RestResponse`:
+Call it like a regular Python method through your [API client](#building-an-api-client). The framework automatically builds and sends the HTTP request using the provided arguments and returns a `RestResponse`.  
+The same endpoint definition works in both `sync` and `async` mode. See [Sync vs Async](#sync-vs-async) for details.
+
+<details open>
+<summary><b>Sync</b></summary>
 
 ```pycon
+>>> client = MyAppAPIClient()
 >>> r = client.Users.get_user(user_id=42, include_posts=True)
 >>> r.status_code
 200
 >>> r.response
 {'id': 42, 'name': 'Jane Doe', 'email': 'jane@example.com', 'posts': [{'id': 1, 'title': 'Hello World'}, {'id': 2, 'title': 'API Design Notes'}]}
 ```
+
+</details>
+
+<details>
+<summary><b>Async</b></summary>
+
+```pycon
+# NOTE: This example uses asyncio REPL (python -m asyncio)
+>>> client = MyAppAPIClient(async_mode=True)
+>>> r = await client.Users.get_user(user_id=42, include_posts=True)
+>>> r.status_code
+200
+>>> r.response
+{'id': 42, 'name': 'Jane Doe', 'email': 'jane@example.com', 'posts': [{'id': 1, 'title': 'Hello World'}, {'id': 2, 'title': 'API Design Notes'}]}
+```
+
+</details>
 
 
 # Building an API Client
@@ -160,7 +183,8 @@ class UsersAPI(APIBase):
 > - `**kwargs` takes framework-level request control options and raw `httpx` options.
 
 > [!TIP]
-> Consider creating an app-level base class instead of subclassing `APIBase` directly. See [API Class (`APIBase`)](#api-class-apibase) for details.
+> - Consider creating an app-level base class instead of subclassing `APIBase` directly. See [API Class (`APIBase`)](#api-class-apibase) for details.
+> - If your use case is async-only, you can define the endpoint with `async def` instead of `def`. See [Sync vs Async](#sync-vs-async) for details.
 
 ### 2. Define the API client
 
@@ -235,9 +259,6 @@ That's it. At this point, your API client is ready to use.
 > ```
 
 
----
-
-
 # Core Concepts
 
 ## Endpoint Factory (`endpoint`)
@@ -308,7 +329,11 @@ def list_items(self, *, page: int = Unset, page_size: int = Unset, **kwargs: Unp
 Call an endpoint function just like a regular method to make an API request. The framework generates the request payload, performs the HTTP request, and returns the response as a [`RestResponse`](#restresponse) object:
 
 ```python
+# sync
 r = client.Auth.login(username="foo", password="bar")
+
+# async
+r = await client.Auth.login(username="foo", password="bar")
 ```
 
 Beyond the endpoint's own parameters, the function also accepts framework-level control options and `httpx` raw options as `**kwargs`. See [`Kwargs`](#kwargs-and-unpack).
@@ -521,6 +546,9 @@ def post_request_hook(
     **params: Any,
 ) -> None: ...
 ```
+
+> [!NOTE]
+> If your use case is async-only, `pre_request_hook` and `post_request_hook` may also be defined with `async def` instead of `def`. See [Sync vs Async](#sync-vs-async) for details.
 
 #### `request_wrapper`
 
@@ -740,7 +768,42 @@ GET /users
 > [!NOTE]
 > `APIBase.init()` must be called from an `__init__.py` file. Calling it from any other module raises a `RuntimeError`.
 
----
+
+# Sync vs Async
+
+The framework supports both `sync` and `async` execution **from the same endpoint definition**. The execution mode is determined by how your API client is instantiated.
+
+| Mode           | Constructor                       | Calling an endpoint            |
+|----------------|-----------------------------------|--------------------------------|
+| Sync (default) | `MyAppAPIClient()`                | Returns a `RestResponse`       |
+| Async          | `MyAppAPIClient(async_mode=True)` | Returns a coroutine to `await` |
+
+## Choosing between `def` and `async def`
+
+Endpoint functions and request hooks may be defined with either `def` or `async def`. The choice determines which client modes the definition supports.
+
+### `def` (dual-mode)
+
+A regular `def` works with **both** `sync` and `async` clients. The same endpoint or hook definition can be called from either mode without modification.  
+This is recommended when the endpoint function body is empty (the common case), or when your custom function logic or hook is entirely synchronous.
+
+### `async def` (async-only)
+
+An `async def` works **only** with an async client (`async_mode=True`). Use it when your custom function logic or request hook needs to await other coroutines (for example, making additional async requests or performing other asynchronous work).  
+Calling an `async def` endpoint or hook from a sync client raises a `RuntimeError`.
+
+Here is a quick summary:
+
+| Definition  | Sync client | Async client | Can `await` inside body? |
+|-------------|-------------|--------------|--------------------------|
+| `def`       | ✅           | ✅         | ❌                        |
+| `async def` | ❌           | ✅         | ✅                        |
+
+The framework does not favor one style over the other. Choose the one that matches your application's requirements.
+
+> [!NOTE]
+> With an async client, a `def` endpoint body or request hook runs directly on the event loop, not offloaded to a thread. If it performs blocking I/O (such as `time.sleep()`, synchronous HTTP requests, or blocking disk/database access), it will block the event loop and stall other concurrent tasks (for example, `with_concurrency()` or `asyncio.gather()`). If the body or hook needs to perform I/O under an async client, define it with `async def` and await asynchronous operations instead.
+
 
 # Type and Response Reference
 
@@ -844,7 +907,6 @@ def create_session(
 
 The framework sends `"user-id"` as the actual key in the request payload while the Python parameter is named `user_id`.
 
----
 
 # Extending Core
 
@@ -865,7 +927,8 @@ If an endpoint requires custom request logic, replace the stub with your own cod
 > Returning anything other than a `RestResponse` or `None` from a custom function body raises a `RuntimeError`.
 
 > [!TIP]
-> If you only need to add behavior before or after the request, use a [registered decorator](#add-a-custom-registered-decorator) or [request hooks](#request-hooks) instead.
+> - If you only need to add behavior before or after the request, use a [registered decorator](#add-a-custom-registered-decorator) or [request hooks](#request-hooks) instead.
+> - If your use case is async-only, define the function body as `async def` instead of `def` if you need to perform async operations in your custom logic. See [Sync vs Async](#sync-vs-async) for details.
 
 
 ## Add a custom registered decorator

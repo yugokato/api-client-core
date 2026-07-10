@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from functools import partial, wraps
 from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeAlias, TypeVar, cast, overload
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound="APIBase[Any]")
 P = ParamSpec("P")
 R = TypeVar("R", bound=RestResponse)
-_OrigFunc: TypeAlias = Callable[Concatenate[T, P], R]
+_OrigFunc: TypeAlias = Callable[Concatenate[T, P], R | Coroutine[Any, Any, R]]
 _HandlerOrPending: TypeAlias = EndpointHandler[P] | PendingOperations[P]
 _OrigFuncOrPending: TypeAlias = _OrigFunc[T, P, R] | PendingOperations[P]
 

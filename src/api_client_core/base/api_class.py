@@ -6,7 +6,7 @@ import itertools
 import pkgutil
 import sys
 from abc import ABCMeta
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from common_libs.logging import get_logger
@@ -88,8 +88,13 @@ class APIBase(Generic[APIClientT], metaclass=ABCMeta):
         self.api_client = api_client
         self.rest_client = api_client.rest_client
 
-    def pre_request_hook(self, endpoint: Endpoint[Any], *path_params: Any, **params: Any) -> None:
+    def pre_request_hook(
+        self, endpoint: Endpoint[Any], *path_params: Any, **params: Any
+    ) -> None | Coroutine[Any, Any, None]:
         """Hook function called before each request
+
+        May be defined with `async def` instead of `def`. An async hook is awaited on an async client, but raises
+        a `RuntimeError` if the API class is used with a sync client.
 
         :param endpoint: Endpoint object associated with an endpoint function called
         :param path_params: API path parameters
@@ -104,8 +109,11 @@ class APIBase(Generic[APIClientT], metaclass=ABCMeta):
         exception: HTTPError | None,
         *path_params: Any,
         **params: Any,
-    ) -> None:
+    ) -> None | Coroutine[Any, Any, None]:
         """Hook function called after each request
+
+        May be defined with `async def` instead of `def`. An async hook is awaited on an async client, but raises
+        a `RuntimeError` if the API class is used with a sync client.
 
         :param endpoint: Endpoint object associated with an endpoint function called
         :param response: Response of the API request

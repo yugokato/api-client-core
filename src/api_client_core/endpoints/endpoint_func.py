@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Generator, Sequence
 from contextlib import asynccontextmanager, contextmanager
@@ -95,6 +96,26 @@ def requires_instance(f: Callable[Concatenate[_T, _P], _R]) -> Callable[Concaten
     return wrapper
 
 
+def requires_sync_def(f: Callable[Concatenate[_T, _P], _R]) -> Callable[Concatenate[_T, _P], _R]:
+    """Raise if the API method or any request hook is defined with `async def`."""
+
+    @wraps(f)
+    def wrapper(self: _T, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        for name, is_async in (
+            (self._original_func.__name__, self._is_async_func),
+            (self._owner.pre_request_hook.__name__, self._is_async_pre_request_hook),
+            (self._owner.post_request_hook.__name__, self._is_async_post_request_hook),
+        ):
+            if is_async:
+                raise RuntimeError(
+                    f"`{self._owner.__name__}.{name}` is defined with `async def` but called by a sync client. "
+                    f"Either use an async client (async_mode=True), or define the method with `def`."
+                )
+        return f(self, *args, **kwargs)
+
+    return wrapper
+
+
 class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
     """Base class for Sync/Async Endpoint function classes"""
 
@@ -124,6 +145,11 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
         self._use_query_string = endpoint_handler.use_query_string
         self._raw_options = endpoint_handler.default_raw_options
         self._model: type[EndpointModel] | None = None
+
+        # An `async def` method is async-only. These are detected once here and enforced on the sync call paths.
+        self._is_async_func = inspect.iscoroutinefunction(inspect.unwrap(self._original_func))
+        self._is_async_pre_request_hook = inspect.iscoroutinefunction(inspect.unwrap(owner.pre_request_hook))
+        self._is_async_post_request_hook = inspect.iscoroutinefunction(inspect.unwrap(owner.post_request_hook))
 
         self.endpoint: Endpoint[P] = cast(
             "Endpoint[P]",
@@ -209,7 +235,7 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
 
         # pre-request hook
         if with_hooks:
-            self._instance.pre_request_hook(self.endpoint, *path_params, **body_or_query_params)
+            await self._acall_pre_request_hook(path_params, body_or_query_params)
 
         # Make a request
         r = None
@@ -231,15 +257,7 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
                 if not isinstance(r, RestResponse):
                     raise RuntimeError(f"Custom endpoint must return a RestResponse object, got {type(r).__name__}")
             else:
-                sig_defaults = endpoint_call_util.get_signature_defaults(self._original_func, self.path)
-                params = endpoint_call_util.generate_rest_func_params(
-                    self.endpoint,
-                    {**sig_defaults, **body_or_query_params},
-                    self.rest_client.client.headers,
-                    quiet=quiet,
-                    use_query_string=self._use_query_string,
-                    **self._raw_options | (raw_options or {}),
-                )
+                params = self._generate_call_params(quiet, raw_options, body_or_query_params)
                 r = await self._call_api_func(path, params)
             return r
         except HTTPError as e:
@@ -249,7 +267,8 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
             with_hooks = False
             raise
         finally:
-            self._run_post_hook(r, exception, with_hooks, path_params, body_or_query_params)
+            if with_hooks:
+                await self._acall_post_request_hook(r, exception, path_params, body_or_query_params)
 
     @property
     def model(self) -> type[EndpointModel]:
@@ -594,24 +613,12 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
         """
         return endpoint_model_util.create_endpoint_model(self)
 
-    def _prepare_stream_request(
-        self,
-        path_params: tuple[Any, ...],
-        quiet: bool,
-        with_hooks: bool | None,
-        raw_options: dict[str, Any] | None,
-        body_or_query_params: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
-        """Validate params, run pre-request hook, generate REST params for streaming.
-
-        Returns (path, params) tuple.
-        """
-        path = endpoint_call_util.complete_endpoint(self.endpoint, path_params)
-        endpoint_call_util.validate_params(self.endpoint, body_or_query_params, raw_options)
-        if with_hooks:
-            self._instance.pre_request_hook(self.endpoint, *path_params, **body_or_query_params)
+    def _generate_call_params(
+        self, quiet: bool, raw_options: dict[str, Any] | None, body_or_query_params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Generate params to pass to the underlying rest client call for a request."""
         sig_defaults = endpoint_call_util.get_signature_defaults(self._original_func, self.path)
-        params = endpoint_call_util.generate_rest_func_params(
+        return endpoint_call_util.generate_rest_func_params(
             self.endpoint,
             {**sig_defaults, **body_or_query_params},
             self.rest_client.client.headers,
@@ -619,24 +626,29 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
             use_query_string=self._use_query_string,
             **self._raw_options | (raw_options or {}),
         )
-        return path, params
 
-    def _run_post_hook(
+    async def _acall_pre_request_hook(self, path_params: tuple[Any, ...], body_or_query_params: dict[str, Any]) -> None:
+        """Call `pre_request_hook`, awaiting the result when the hook is async."""
+        result = self._instance.pre_request_hook(self.endpoint, *path_params, **body_or_query_params)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _acall_post_request_hook(
         self,
         r: RestResponse | None,
         exception: Exception | None,
-        with_hooks: bool | None,
         path_params: tuple[Any, ...],
         body_or_query_params: dict[str, Any],
     ) -> None:
-        """Run post-request hook with standard error handling."""
-        if with_hooks:
-            try:
-                self._instance.post_request_hook(self.endpoint, r, exception, *path_params, **body_or_query_params)
-            except AssertionError:
-                raise
-            except Exception as e:
-                logger.exception(e)
+        """Call `post_request_hook` with standard error handling, awaiting the result when the hook is async."""
+        try:
+            result = self._instance.post_request_hook(self.endpoint, r, exception, *path_params, **body_or_query_params)
+            if asyncio.iscoroutine(result):
+                await result
+        except AssertionError:
+            raise
+        except Exception as e:
+            logger.exception(e)
 
     async def _call_original_func(
         self, func_args: tuple[Any, ...], func_kwargs: dict[str, Any], kwargs: dict[str, Any]
@@ -649,8 +661,8 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
         """
         r = self._original_func(self._instance, *func_args, **{**func_kwargs, **kwargs})
         if self.api_client.async_mode and asyncio.iscoroutine(r):
-            # The original function is not an async function but rest_client used inside the original function is
-            # AsyncRestClient, which means the returned value will be a coroutine. We can await it and get the actual
+            # The original function returned a coroutine, either because it is itself `async def`, or because it
+            # is a plain `def` that called the AsyncRestClient. Either way, we can await it and get the actual
             # value in here
             r = await r
         return r
@@ -740,6 +752,7 @@ class SyncEndpointFunc(EndpointFunc[P]):
     executor = SyncExecutor()
 
     @requires_instance
+    @requires_sync_def
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RestResponse:
         """Make a sync API call to the endpoint"""
         return self._run_coroutine_sync(super().__call__(*args, **kwargs))
@@ -843,6 +856,7 @@ class SyncEndpointFunc(EndpointFunc[P]):
         )
 
     @contextmanager
+    @requires_sync_def
     def _stream(
         self,
         *args: Any,
@@ -862,7 +876,11 @@ class SyncEndpointFunc(EndpointFunc[P]):
         path_params, body_or_query_params = endpoint_call_util.split_params(
             self._original_func, self.path, args, kwargs
         )
-        path, params = self._prepare_stream_request(path_params, quiet, with_hooks, raw_options, body_or_query_params)
+        path = endpoint_call_util.complete_endpoint(self.endpoint, path_params)
+        endpoint_call_util.validate_params(self.endpoint, body_or_query_params, raw_options)
+        if with_hooks:
+            self._run_coroutine_sync(self._acall_pre_request_hook(path_params, body_or_query_params))
+        params = self._generate_call_params(quiet, raw_options, body_or_query_params)
         r = None
         exception = None
         try:
@@ -875,7 +893,8 @@ class SyncEndpointFunc(EndpointFunc[P]):
             with_hooks = False
             raise
         finally:
-            self._run_post_hook(r, exception, with_hooks, path_params, body_or_query_params)
+            if with_hooks:
+                self._run_coroutine_sync(self._acall_post_request_hook(r, exception, path_params, body_or_query_params))
 
     @staticmethod
     def _run_coroutine_sync(coro: Coroutine[Any, Any, _R]) -> _R:
@@ -1051,7 +1070,11 @@ class AsyncEndpointFunc(EndpointFunc[P]):
         path_params, body_or_query_params = endpoint_call_util.split_params(
             self._original_func, self.path, args, kwargs
         )
-        path, params = self._prepare_stream_request(path_params, quiet, with_hooks, raw_options, body_or_query_params)
+        path = endpoint_call_util.complete_endpoint(self.endpoint, path_params)
+        endpoint_call_util.validate_params(self.endpoint, body_or_query_params, raw_options)
+        if with_hooks:
+            await self._acall_pre_request_hook(path_params, body_or_query_params)
+        params = self._generate_call_params(quiet, raw_options, body_or_query_params)
         r = None
         exception = None
         try:
@@ -1064,4 +1087,5 @@ class AsyncEndpointFunc(EndpointFunc[P]):
             with_hooks = False
             raise
         finally:
-            self._run_post_hook(r, exception, with_hooks, path_params, body_or_query_params)
+            if with_hooks:
+                await self._acall_post_request_hook(r, exception, path_params, body_or_query_params)
