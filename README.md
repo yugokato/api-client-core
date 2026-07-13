@@ -820,6 +820,7 @@ api_client_core.setup_logging()
 ```
 
 This installs the default logging configuration, enabling colored console output at the `INFO` level, including API request and response logs.  
+All of the package's logs are emitted under the `api_client_core` logger name.
 To customize the configuration, pass `config` (a `dict` to replace the default logging config) and/or `delta_config` (a `dict` to merge changes into the base config). See the [default logging configuration](src/api_client_core/cfg/logging.yaml) for the default settings.
 
 

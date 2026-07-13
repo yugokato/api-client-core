@@ -9,11 +9,6 @@ formatters:
   default:
     class: common_libs.logging.LogFormatter
 loggers:
-  common_libs:
-    level: INFO
-    handlers:
-      - console
-    propagate: false
   api_client_core:
     level: INFO
     handlers:

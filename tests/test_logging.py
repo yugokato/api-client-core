@@ -108,3 +108,94 @@ class TestSetupLogging:
         logger = logging.getLogger("api_client_core")
         assert logger.level == logging.ERROR
         assert any(isinstance(handler, ColoredStreamHandler) for handler in logger.handlers)
+
+    def test_custom_config_without_common_libs_logger_still_configures_it(self) -> None:
+        """Test that a custom config lacking a `common_libs` logger has one mirrored from `api_client_core`'s"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "handlers": {
+                "console": {
+                    "class": "common_libs.logging.ColoredStreamHandler",
+                    "formatter": "default",
+                    "stream": "ext://sys.stdout",
+                }
+            },
+            "formatters": {"default": {"class": "common_libs.logging.LogFormatter"}},
+            "loggers": {"api_client_core": {"level": "WARNING", "handlers": ["console"], "propagate": False}},
+        }
+
+        setup_logging(config)
+
+        logger = logging.getLogger("common_libs")
+        assert logger.level == logging.WARNING
+        assert logger.propagate is False
+        assert any(isinstance(handler, ColoredStreamHandler) for handler in logger.handlers)
+
+    def test_custom_config_with_explicit_common_libs_logger_is_not_overridden(self) -> None:
+        """Test that an explicit `common_libs` logger entry in a custom config is left untouched"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {
+                "api_client_core": {"level": "WARNING"},
+                "common_libs": {"level": "ERROR"},
+            },
+        }
+
+        setup_logging(config)
+
+        assert logging.getLogger("common_libs").level == logging.ERROR
+
+    def test_config_without_api_client_core_logger_leaves_common_libs_untouched(self) -> None:
+        """Test that mirroring is a no-op when the config has no `api_client_core` logger"""
+        pre_existing_logger = logging.getLogger("common_libs")
+
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {"some_other_logger": {"level": "WARNING"}},
+        }
+
+        setup_logging(config)
+
+        assert pre_existing_logger.disabled is False
+
+    def test_delta_config_override_of_api_client_core_level_is_reflected_in_mirror(self) -> None:
+        """Test that mirroring reflects `api_client_core`'s level after `delta_config` is applied"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {"api_client_core": {"level": "WARNING"}},
+        }
+        delta_config: dict[str, Any] = {"loggers": {"api_client_core": {"level": "ERROR"}}}
+
+        setup_logging(config, delta_config=delta_config)
+
+        assert logging.getLogger("api_client_core").level == logging.ERROR
+        assert logging.getLogger("common_libs").level == logging.ERROR
+
+    def test_delta_config_with_explicit_common_libs_logger_is_not_overridden(self) -> None:
+        """Test that an explicit `common_libs` logger entry in `delta_config` is left untouched by mirroring"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {"api_client_core": {"level": "WARNING", "propagate": False}},
+        }
+        delta_config: dict[str, Any] = {"loggers": {"common_libs": {"level": "ERROR"}}}
+
+        setup_logging(config, delta_config=delta_config)
+
+        logger = logging.getLogger("common_libs")
+        assert logger.level == logging.ERROR
+        assert logger.propagate is True
+
+    def test_invalid_config_type_raises_type_error(self) -> None:
+        """Test that a non-Mapping `config` raises a `TypeError`"""
+        with pytest.raises(TypeError, match="must be a Mapping"):
+            setup_logging(config=42)
+
+    def test_invalid_delta_config_type_raises_type_error(self) -> None:
+        """Test that a non-Mapping `delta_config` raises a `TypeError`"""
+        with pytest.raises(TypeError, match="must be a Mapping"):
+            setup_logging(delta_config=42)
