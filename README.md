@@ -25,6 +25,7 @@ The framework uses the `httpx`-based REST client from [common-libs](https://gith
   - [API Statistics (`Stats`)](#api-statistics-stats)
   - [Automatic Discovery (`BaseAPI.init()`)](#automatic-discovery-baseapiinit)
 - [Sync vs Async](#sync-vs-async)
+- [Logging](#logging)
 - [Type and Response Reference](#type-and-response-reference)
 - [Extending Core](#extending-core)
 
@@ -245,6 +246,9 @@ That's it. At this point, your API client is ready to use.
 >>> r.response
 {'token': 'eyJ1c2VySWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ.d8f3Kx91LmQa7P2v', 'refresh_token': 'rft_91LmQa7P2vXk82', 'token_type': 'Bearer', 'expires_in': 3600}
 ```
+
+> [!NOTE]
+> The request/response logging shown above is disabled by default. See [Logging](#logging) for how to enable it.
 
 > [!TIP]
 > The recommended way to use a client is as a context manager, which ensures HTTP connections are cleaned up on exit:
@@ -803,6 +807,20 @@ The framework does not favor one style over the other. Choose the one that match
 
 > [!NOTE]
 > With an async client, a `def` endpoint body or request hook runs directly on the event loop, not offloaded to a thread. If it performs blocking I/O (such as `time.sleep()`, synchronous HTTP requests, or blocking disk/database access), it will block the event loop and stall other concurrent tasks (for example, `with_concurrency()` or `asyncio.gather()`). If the body or hook needs to perform I/O under an async client, define it with `async def` and await asynchronous operations instead.
+
+
+# Logging
+
+The framework is silent by default and does not configure logging automatically. To enable logging, call `setup_logging()` once during your application's startup:
+
+```python
+import api_client_core
+
+api_client_core.setup_logging()
+```
+
+This installs the default logging configuration, enabling colored console output at the `INFO` level, including API request and response logs.  
+To customize the configuration, pass `config` (a `dict` to replace the default logging config) and/or `delta_config` (a `dict` to merge changes into the base config). See the [default logging configuration](src/api_client_core/cfg/logging.yaml) for the default settings.
 
 
 # Type and Response Reference
