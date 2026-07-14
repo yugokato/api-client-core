@@ -507,6 +507,44 @@ class TestGenerateRestFuncParams:
         result = endpoint_call_util.generate_rest_func_params(endpoint, {}, {}, timeout=30)
         assert result["timeout"] == 30
 
+    def test_raw_params_option_merges_with_generated_query_params(self) -> None:
+        """Test that a raw `params` option is merged with generated query params instead of being dropped"""
+        endpoint = _make_endpoint({"page": Annotated[int, Query()]})
+        result = endpoint_call_util.generate_rest_func_params(endpoint, {"page": 1}, {}, params={"extra": "x"})
+        assert result["params"] == {"page": 1, "extra": "x"}
+
+    def test_raw_json_option_merges_with_generated_body(self) -> None:
+        """Test that a raw `json` option is merged with the generated JSON body instead of being dropped"""
+        endpoint = _make_endpoint({"name": str})
+        result = endpoint_call_util.generate_rest_func_params(endpoint, {"name": "Alice"}, {}, json={"extra": 1})
+        assert result["json"] == {"name": "Alice", "extra": 1}
+
+    def test_raw_option_wins_over_endpoint_param_on_key_conflict(self, mocker: MockerFixture) -> None:
+        """Test that a raw option value overrides an endpoint param targeting the same key, with a warning"""
+        mock_log = mocker.patch.object(endpoint_call_util, "logger")
+        endpoint = _make_endpoint({"name": str})
+        result = endpoint_call_util.generate_rest_func_params(
+            endpoint, {"name": "Alice"}, {}, json={"name": "override"}
+        )
+        assert result["json"] == {"name": "override"}
+        mock_log.warning.assert_called_once()
+        assert "raw_options['json']" in mock_log.warning.call_args[0][0]
+
+    def test_non_dict_raw_json_option_wins_wholesale(self, mocker: MockerFixture) -> None:
+        """Test that a non-dict raw `json` option replaces the generated body entirely, with a warning"""
+        mock_log = mocker.patch.object(endpoint_call_util, "logger")
+        endpoint = _make_endpoint({"name": str})
+        result = endpoint_call_util.generate_rest_func_params(endpoint, {"name": "Alice"}, {}, json=[1, 2])
+        assert result["json"] == [1, 2]
+        mock_log.warning.assert_called_once()
+
+    def test_merged_raw_option_without_key_conflict_logs_no_warning(self, mocker: MockerFixture) -> None:
+        """Test that merging a raw option with no overlapping keys does not log a warning"""
+        mock_log = mocker.patch.object(endpoint_call_util, "logger")
+        endpoint = _make_endpoint({"name": str})
+        endpoint_call_util.generate_rest_func_params(endpoint, {"name": "Alice"}, {}, json={"extra": 1})
+        mock_log.warning.assert_not_called()
+
     def test_json_param_goes_to_json_key(self) -> None:
         """Test that a regular body param on a JSON endpoint goes to the `json` output key"""
         endpoint = _make_endpoint({"name": str})

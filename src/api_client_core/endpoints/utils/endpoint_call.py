@@ -185,6 +185,10 @@ def generate_rest_func_params(
     """Convert params passed to an endpoint function to ones for a low-level rest call function.
     Also set Content-Type header if needed
 
+    When a raw option targets the same request slot as generated endpoint params (`json`, `data`, `params`, or
+    `files`), the two are merged with the raw option winning on key conflicts, so `raw_options` stays a low-level
+    escape hatch that can both add extra entries and override typed params. A warning is logged on conflicts.
+
     :param endpoint: Endpoint obj
     :param endpoint_params: Params passed to an endpoint function call
     :param session_headers: Request client's session headers
@@ -266,13 +270,13 @@ def generate_rest_func_params(
                     data[param_name] = param_value
 
     if json_:
-        rest_func_params["json"] = json_
+        _merge_request_arg(rest_func_params, "json", json_)
     if data:
-        rest_func_params["data"] = data
+        _merge_request_arg(rest_func_params, "data", data)
     if query_params:
-        rest_func_params["params"] = query_params
+        _merge_request_arg(rest_func_params, "params", query_params)
     if file_data := files.to_dict():
-        rest_func_params["files"] = file_data
+        _merge_request_arg(rest_func_params, "files", file_data)
 
     # httpx will not automatically set Content-Type when `data` is a string or bytes.
     # Fall back to the endpoint's declared Content-Type in that case, unless the header is explicitly
@@ -334,6 +338,33 @@ def validate_params(endpoint: Endpoint[Any], params: dict[str, Any], raw_options
                 dataclass_fields[param_name].type
             ):
                 logger.warning(f"DEPRECATED: parameter '{param_name}' is deprecated")
+
+
+def _merge_request_arg(rest_func_params: dict[str, Any], slot: str, generated: dict[str, Any]) -> None:
+    """Set a generated request container on the rest func params, merging with a raw option of the same name.
+
+    When the caller also provided the slot via `raw_options`, a dict raw value is merged with the generated one,
+    with the raw value winning on key conflicts. A non-dict raw value (e.g. `json` as a list, `data` as str/bytes)
+    wins wholesale. A warning is logged in both cases so an intentional override is visible and an accidental one
+    is diagnosable.
+
+    :param rest_func_params: Params being built for the rest client call. Already seeded with `raw_options`
+    :param slot: Request container name (`json`, `data`, `params`, or `files`)
+    :param generated: Container value generated from the endpoint parameters
+    """
+    if slot not in rest_func_params:
+        rest_func_params[slot] = generated
+        return
+    raw_value = rest_func_params[slot]
+    if isinstance(raw_value, dict):
+        if conflicts := sorted(set(generated) & set(raw_value)):
+            logger.warning(f"raw_options['{slot}'] overrides endpoint parameter(s):\n{list_items(conflicts)}")
+        rest_func_params[slot] = {**generated, **raw_value}
+    else:
+        logger.warning(
+            f"raw_options['{slot}'] is not a dict and takes precedence. Endpoint parameters routed to '{slot}' "
+            f"are ignored: {sorted(generated)}"
+        )
 
 
 def _resolve_path_params(func: Callable[..., Any], path: str, named: dict[str, Any]) -> tuple[Any, ...]:
