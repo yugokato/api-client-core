@@ -58,6 +58,10 @@ class APIClient:
                 raise TypeError(f"rest_client must be of type {RestClient.__name__} when async_mode is False")
             if base_url:
                 raise ValueError("base_url is not supported when rest_client is provided")
+            if kwargs:
+                raise ValueError(
+                    f"Additional keyword arguments are not supported when rest_client is provided: {sorted(kwargs)}"
+                )
 
             self.rest_client = rest_client
             self._base_url = rest_client.base_url

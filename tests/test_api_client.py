@@ -42,6 +42,13 @@ class TestAPIClientInit:
         with pytest.raises(ValueError, match="base_url is not supported when rest_client is provided"):
             APIClient("myapp", base_url=BASE_URL, rest_client=rest_client)
 
+    def test_init_raises_when_extra_kwargs_given_with_rest_client(self) -> None:
+        """Test that providing extra keyword arguments together with rest_client raises ValueError instead of
+        silently ignoring them"""
+        rest_client = RestClient(BASE_URL)
+        with pytest.raises(ValueError, match="Additional keyword arguments are not supported"):
+            APIClient("myapp", rest_client=rest_client, timeout=30)
+
     def test_init_raises_when_sync_rest_client_given_in_async_mode(self) -> None:
         """Test that passing a sync RestClient with async_mode=True raises TypeError"""
         rest_client = RestClient(BASE_URL)

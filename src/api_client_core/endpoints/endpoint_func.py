@@ -337,7 +337,7 @@ class EndpointFunc(Generic[P], metaclass=_QualNameReprMeta):
                           '{app_name}-{APIClass}.{func_name}'.
         """
         if not lock_name:
-            lock_name = f"{self._instance.app_name}-{type(self._instance).__name__}.{self._original_func.__name__}"
+            lock_name = f"{self.api_client.app_name}-{type(self._instance).__name__}.{self._original_func.__name__}"
 
         def call_with_lock(f: Callable[..., Any]) -> Callable[..., Any]:
             if self.api_client.async_mode:
