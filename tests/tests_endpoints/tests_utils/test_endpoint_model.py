@@ -250,8 +250,13 @@ class TestBuildEndpointModel:
         assert model.content_type == "text/plain"
         assert model.endpoint_func is ef
 
-    def test_path_body_name_collision_renames_path_field(self) -> None:
-        """Test that a path field whose name collides with a body field is renamed with `_` suffix"""
+    def test_path_body_name_collision_renames_body_field_with_alias(self) -> None:
+        """Test that a body field whose name collides with a path field is renamed with a `_` suffix and
+        aliased back to the original name, while the path field keeps its name.
+
+        The path field must keep its name so runtime path resolution (which matches `{placeholder}` tokens)
+        keeps routing the path value to the URL. The alias restores the body param's wire name.
+        """
 
         def _f(self: Any, name: str) -> None: ...
 
@@ -259,9 +264,40 @@ class TestBuildEndpointModel:
         path = [DataclassModelField("name", str, _path_field())]
         body = [DataclassModelField("name", str, _body_field())]
         model = endpoint_model_util.build_endpoint_model(ef, path, body)
-        # Path field should be renamed "name_". Body field "name" stays
-        assert "name_" in model.__dataclass_fields__
-        assert "name" in model.__dataclass_fields__
+
+        assert model.__dataclass_fields__["name"].metadata == {"path": True}
+        body_aliases = [m for m in model.__dataclass_fields__["name_"].type.__metadata__ if isinstance(m, Alias)]
+        assert body_aliases == [Alias("name")]
+
+    def test_path_body_name_collision_with_non_identifier_name_gets_single_alias(self) -> None:
+        """Test that a non-identifier name collision produces a cleaned body field name with exactly one Alias.
+
+        The body field is renamed using the cleaned name so that the later illegal-name sanitizer pass leaves
+        it alone instead of adding a second Alias (which would make every call fail).
+        """
+
+        def _f(self: Any) -> None: ...
+
+        ef = _FakeEndpointFunc(_f, path="/v1/{item-id}/items")
+        path = [DataclassModelField("item-id", str, _path_field())]
+        body = [DataclassModelField("item-id", str, _body_field())]
+        model = endpoint_model_util.build_endpoint_model(ef, path, body)
+
+        body_aliases = [m for m in model.__dataclass_fields__["item_id_"].type.__metadata__ if isinstance(m, Alias)]
+        assert body_aliases == [Alias("item-id")]
+
+    def test_path_body_name_collision_keeps_existing_alias(self) -> None:
+        """Test that a colliding body field that already carries an Alias keeps it instead of gaining a second one"""
+
+        def _f(self: Any, name: str) -> None: ...
+
+        ef = _FakeEndpointFunc(_f, path="/v1/{name}/items")
+        path = [DataclassModelField("name", str, _path_field())]
+        body = [DataclassModelField("name", Annotated[str, Alias("real-name")], _body_field())]
+        model = endpoint_model_util.build_endpoint_model(ef, path, body)
+
+        body_aliases = [m for m in model.__dataclass_fields__["name_"].type.__metadata__ if isinstance(m, Alias)]
+        assert body_aliases == [Alias("real-name")]
 
     def test_model_name_is_derived_from_endpoint_func_class_name(self) -> None:
         """Test that the model class name replaces 'EndpointFunc' with 'EndpointModel'"""

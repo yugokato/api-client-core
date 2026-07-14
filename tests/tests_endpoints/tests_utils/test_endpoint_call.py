@@ -202,6 +202,18 @@ class TestSplitParams:
         assert path_params == ("c123",)
         assert body_params == {}
 
+    def test_renamed_body_param_conflicting_with_path_placeholder_routes_correctly(self) -> None:
+        """Test that with a body param renamed with a `_` suffix (path/body name conflict convention), the
+        placeholder name routes to the path and the renamed param stays in the body"""
+
+        def _func(self: Any, id: str = Unset, *, id_: int = Unset, **kwargs: Any) -> None: ...
+
+        path_params, body_params = endpoint_call_util.split_params(
+            _func, "/v1/users/{id}", (), {"id": "path-value", "id_": 999}
+        )
+        assert path_params == ("path-value",)
+        assert body_params == {"id_": 999}
+
     def test_unknown_kwarg_reraises_as_natural_type_error(self) -> None:
         """Test that an unknown keyword argument causes a natural TypeError including the function name"""
 

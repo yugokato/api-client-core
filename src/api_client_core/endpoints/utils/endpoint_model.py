@@ -108,10 +108,18 @@ def build_endpoint_model(
 
     model_name = f"{type(endpoint_func).__name__.replace('EndpointFunc', EndpointModel.__name__)}"
 
-    # Address the case where a path param name conflicts with body/query param name
-    for i, (field_name, field_type, field_default) in enumerate(path_param_fields):
-        if field_name in [x[0] for x in body_or_query_param_fields]:
-            path_param_fields[i] = DataclassModelField(f"{field_name}_", field_type, field_default)
+    # Address the case where a path param name conflicts with a body/query param name. The body field is the
+    # one renamed (path params must keep matching their {placeholder} at request time) and is aliased back to
+    # the original name so the wire name is preserved. The cleaned name is used so the sanitizer pass below
+    # leaves the renamed field alone (renaming it again would add a second Alias)
+    path_field_names = {x[0] for x in path_param_fields}
+    for i, (field_name, field_type, field_default) in enumerate(body_or_query_param_fields):
+        if field_name in path_field_names:
+            if param_type_util.get_annotated_type(field_type, metadata_filter=Alias) is None:
+                field_type = param_type_util.annotate_type(field_type, Alias(field_name))
+            body_or_query_param_fields[i] = DataclassModelField(
+                f"{clean_model_field_name(field_name)}_", field_type, field_default
+            )
 
     # Some parameter names use characters that are illegal as Python variable names.
     # We will use the cleaned name as the model field and annotate it as `Annotated[field_type, Alias(<original_val>)]`
