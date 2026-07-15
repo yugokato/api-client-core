@@ -16,7 +16,7 @@ from filelock import Timeout as FileLockTimeout
 from httpx import AsyncClient, Client, HTTPStatusError
 from pytest_mock import MockerFixture
 
-import api_client_core.endpoints.endpoint_func.call_wrapper_mixins as _call_wrapper_mixins_module
+import api_client_core.endpoints.endpoint_func.call_wrappers as _call_wrappers_module
 from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints import AsyncEndpointFunc, Stats, SyncEndpointFunc, endpoint
 from api_client_core.endpoints.stats import StatsCollector
@@ -31,7 +31,7 @@ class TestEndpointFuncCallWithLock:
     ) -> None:
         """Test that with_lock auto-generates a lock name as '{app_name}-{APIClass}.{func_name}'"""
         mocker.patch.object(Client, "request")
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -46,7 +46,7 @@ class TestEndpointFuncCallWithLock:
     ) -> None:
         """Test that explicitly providing lock_name overrides the auto-generated name"""
         mocker.patch.object(Client, "request")
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -75,7 +75,7 @@ class TestEndpointFuncCallWithLock:
 
         mock_request.side_effect = _request_side_effect
 
-        mock_lock_cls = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock_instance = mocker.MagicMock()
         mock_lock_cls.return_value = mock_lock_instance
         mock_lock_instance.__enter__ = mocker.MagicMock(side_effect=lambda: call_order.append("lock_enter"))
@@ -106,7 +106,7 @@ class TestEndpointFuncCallWithLock:
 
         mock_request.side_effect = _request_side_effect
 
-        mock_lock_cls = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{AsyncLock.__name__}")
+        mock_lock_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{AsyncLock.__name__}")
         mock_lock_instance = mocker.MagicMock()
         mock_lock_cls.return_value = mock_lock_instance
         mock_lock_instance.__aenter__.side_effect = lambda: call_order.append("lock_enter")
@@ -122,7 +122,7 @@ class TestEndpointFuncCallWithLock:
     ) -> None:
         """Test that with_lock returns a RestResponse"""
         mocker.patch.object(Client, "request")
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -253,7 +253,7 @@ class TestEndpointFuncCallWithRetrySync:
         self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry passes the correct keyword arguments to retry_on"""
-        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrappers_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -274,7 +274,7 @@ class TestEndpointFuncCallWithRetrySync:
         self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True is forwarded to retry_on"""
-        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrappers_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -322,7 +322,7 @@ class TestEndpointFuncCallWithRetryAsync:
         self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_retry passes async_mode=True to retry_on"""
-        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrappers_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -342,7 +342,7 @@ class TestEndpointFuncCallWithRetryAsync:
         self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True is forwarded to retry_on"""
-        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrappers_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -692,11 +692,11 @@ class TestEndpointFuncCallWithPolling:
                 _make_httpx_response(200, mocker),
             ],
         )
-        # Patch time in call_wrapper_mixins's namespace only so asyncio's internal time.monotonic() is unaffected.
+        # Patch time in call_wrappers's namespace only so asyncio's internal time.monotonic() is unaffected.
         # Return values: deadline_call=0.0, check_after_1st_poll=1.0, check_after_2nd_poll=2.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 1.0, 2.0]
-        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
+        mocker.patch.object(_call_wrappers_module, "time", mock_time)
         instance = api_class(api_client)
         r = instance.get_something.with_polling(until=lambda resp: resp.status_code == 200, interval=0.5, timeout=60)()
         assert isinstance(r, RestResponse)
@@ -713,7 +713,7 @@ class TestEndpointFuncCallWithPolling:
         # deadline = 0.0 + 5 = 5.0. After one failed poll, monotonic returns 10.0 → 10.0 + 0.1 >= 5.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 10.0]
-        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
+        mocker.patch.object(_call_wrappers_module, "time", mock_time)
         instance = api_class(api_client)
         with pytest.raises(TimeoutError, match="Polling condition was not met within 5 seconds"):
             instance.get_something.with_polling(until=lambda resp: resp.status_code == 200, interval=0.1, timeout=5)()
@@ -737,7 +737,7 @@ class TestEndpointFuncCallWithPolling:
         # Simulate: t=0 (start), t=0.1 (after first call), t=0.9 (after sleep), t=1.1 (after second call → expired)
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 0.1, 0.9, 1.1]
-        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
+        mocker.patch.object(_call_wrappers_module, "time", mock_time)
         sleep_mock = mock_time.sleep
 
         call_count = 0
@@ -781,11 +781,11 @@ class TestEndpointFuncCallWithPolling:
             ],
         )
         mock_sleep = mocker.patch("asyncio.sleep")
-        # Patch time in call_wrapper_mixins's namespace only so asyncio's internal time.monotonic() is unaffected.
+        # Patch time in call_wrappers's namespace only so asyncio's internal time.monotonic() is unaffected.
         # Return values: deadline_call=0.0, check_after_1st_poll=1.0, check_after_2nd_poll=2.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 1.0, 2.0]
-        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
+        mocker.patch.object(_call_wrappers_module, "time", mock_time)
         instance = api_class_async(api_client_async)
         r = await instance.get_something.with_polling(
             until=lambda resp: resp.status_code == 200, interval=0.5, timeout=60
@@ -805,7 +805,7 @@ class TestEndpointFuncCallWithPolling:
         # deadline = 0.0 + 5 = 5.0. After one failed poll, monotonic returns 10.0 → 10.0 + 0.1 >= 5.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 10.0]
-        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
+        mocker.patch.object(_call_wrappers_module, "time", mock_time)
         instance = api_class_async(api_client_async)
         with pytest.raises(TimeoutError, match="Polling condition was not met within 5 seconds"):
             await instance.get_something.with_polling(
@@ -829,7 +829,7 @@ class TestEndpointFuncCallWithChaining:
             "request",
             side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
         )
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -854,7 +854,7 @@ class TestEndpointFuncCallWithChaining:
             "request",
             side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
         )
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -879,7 +879,7 @@ class TestEndpointFuncCallWithChaining:
             "request",
             side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
         )
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{AsyncLock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{AsyncLock.__name__}")
 
         instance = api_class_async(api_client_async)
         r = await instance.get_something.with_lock().with_retry(condition=503, num_retries=1, retry_after=0)()
@@ -1058,7 +1058,7 @@ class TestEndpointFuncCallWithChaining:
                 _make_httpx_response(200, mocker),
             ],
         )
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
         instance = api_class(api_client)
@@ -1596,7 +1596,7 @@ class TestEndpointFuncCallRaiseOnError:
             "request",
             side_effect=[_make_httpx_response(200, mocker), _make_httpx_response(404, mocker)],
         )
-        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrappers_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
         instance = api_class(client)

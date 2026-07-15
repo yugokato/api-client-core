@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Generator
+from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from contextlib import asynccontextmanager, contextmanager
-from functools import cache, partial, wraps
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
+from functools import cache, partial
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 from common_libs.clients.rest_client import AsyncRestClient, RestClient
 from common_libs.logging import get_logger
@@ -17,11 +17,12 @@ from ..executors import AsyncExecutor, SyncExecutor
 from ..stats import collect_stats
 from ..utils import endpoint_call as endpoint_call_util
 from ..utils import endpoint_model as endpoint_model_util
-from .call_wrapper_mixins import AsyncCallWrapperMixin, CallWrapperMixin, SyncCallWrapperMixin, requires_instance
+from ._typing import _as_response, _as_response_stream
+from .call_wrappers import AsyncCallWrapperMixin, CallWrapperMixin, SyncCallWrapperMixin
+from .decorators import requires_instance, requires_sync_def
 
 if TYPE_CHECKING:
     from ...base import BaseAPI
-    from ...types import _ResponseStream
     from ..endpoint import Endpoint
     from ..endpoint_handler import EndpointHandler
 
@@ -30,53 +31,9 @@ __all__ = ["AsyncEndpointFunc", "EndpointFunc", "SyncEndpointFunc"]
 
 
 P = ParamSpec("P")
-# _T is intentionally unparameterized: requires_sync_def is applied across differently-parameterized EndpointFunc
-# subclasses, and bound="EndpointFunc[Any]" would require binding a concrete P here
-_T = TypeVar("_T", bound="EndpointFunc")  # type: ignore[type-arg]
-_P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 logger = get_logger(__name__)
-
-
-def _as_response(f: Callable[_P, Awaitable[RestResponse]]) -> Callable[_P, RestResponse]:
-    """Retype an async callable as a plain callable returning RestResponse.
-
-    Applied to AsyncEndpointFunc.__call__ so that the SyncEndpointFunc | AsyncEndpointFunc union appears as a single
-    non-coroutine callable type to the type checker.
-    At runtime this is a no-op.
-    """
-    return cast(Callable[_P, RestResponse], f)
-
-
-def _as_response_stream(f: Callable[_P, object]) -> Callable[_P, _ResponseStream]:
-    """Retype a context-manager callable as returning the dual _ResponseStream.
-
-    Applied to both SyncEndpointFunc.stream() and AsyncEndpointFunc.stream() so the
-    SyncEndpointFunc | AsyncEndpointFunc union presents a single type that supports both `with` and `async with`.
-    At runtime this is a no-op.
-    """
-    return cast(Callable[_P, "_ResponseStream"], f)
-
-
-def requires_sync_def(f: Callable[Concatenate[_T, _P], _R]) -> Callable[Concatenate[_T, _P], _R]:
-    """Raise if the API method or any request hook is defined with `async def`."""
-
-    @wraps(f)
-    def wrapper(self: _T, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        for name, is_async in (
-            (self._original_func.__name__, self._is_async_func),
-            (self._owner.pre_request_hook.__name__, self._is_async_pre_request_hook),
-            (self._owner.post_request_hook.__name__, self._is_async_post_request_hook),
-        ):
-            if is_async:
-                raise RuntimeError(
-                    f"`{self._owner.__name__}.{name}` is defined with `async def` but called by a sync client. "
-                    f"Either use an async client (async_mode=True), or define the method with `def`."
-                )
-        return f(self, *args, **kwargs)
-
-    return wrapper
 
 
 class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
@@ -86,6 +43,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
 
     def __init__(self, endpoint_handler: EndpointHandler[P], instance: BaseAPI[Any] | None, owner: type[BaseAPI[Any]]):
         """Initialize endpoint function"""
+        super().__init__()
         self.method = endpoint_handler.method
         self.path = endpoint_handler.path
         self.rest_client: RestClient | AsyncRestClient | None
@@ -95,15 +53,6 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
         else:
             self.api_client = None
             self.rest_client = None
-
-        # State used by _build_call to compose with_xxx() wrappers in left-to-right (first=outermost) order
-        self._call_wrappers = ()
-        self._multi_call_wrapper = None  # with_concurrency() / with_repeat()
-        self._outermost_wrapper = None  # with_pagination()
-        self._base_call = None
-        self._terminal_wrapper = None
-        # Status codes declared via with_expected_status(), exempt from the client's raise_on_error
-        self._expected_status_codes = ()
 
         self._instance = instance
         self._owner = owner
@@ -153,12 +102,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
                     my_class.__call__ = decorator()(my_class.__call__)  # type: ignore[method-assign]
                 else:
                     my_class.__call__ = decorator(my_class.__call__)  # type: ignore[method-assign]
-            # Snapshot the fully-decorated __call__ as the base that with_xxx() wrappers compose around.
-            # This must remain unwrapped so that with_xxx() chains compose on the clean base. The
-            # raise_on_error wrapper (if active) is applied separately as the outermost layer below.
-            self._base_call = my_class.__call__
-            if instance.api_client.raise_on_error:
-                my_class.__call__ = self._make_raise_on_error_wrapper(self._base_call)  # type: ignore[method-assign]
+            self._setup_base_call(my_class)
 
     def __repr__(self) -> str:
         return (

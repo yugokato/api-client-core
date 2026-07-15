@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from contextvars import copy_context
 from copy import copy
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Concatenate, Generic, Literal, ParamSpec, Self, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Generic, Literal, ParamSpec, Self, cast, overload
 
 from common_libs.clients.rest_client.retry import BackoffStrategy, retry_on
 from common_libs.job_executor import Job, run_concurrent
@@ -14,6 +14,7 @@ from common_libs.lock import AsyncLock, Lock
 from common_libs.logging import get_logger
 
 from ..stats import Stats
+from .decorators import requires_instance, terminal
 
 if TYPE_CHECKING:
     from ...base import BaseAPI
@@ -21,61 +22,24 @@ if TYPE_CHECKING:
     from ...types import RestResponse, _ResponseList, _ResponseOrExceptionList, _ResponsePages
     from ..endpoint import Endpoint
     from ..stats import StatsCollector
+    from .endpoint_func import EndpointFunc
 
 
 __all__ = ["AsyncCallWrapperMixin", "CallWrapperMixin", "SyncCallWrapperMixin"]
 
 
 P = ParamSpec("P")
-# _T is intentionally unparameterized: bound="CallWrapperMixin[Any]" widens the class-scoped P to Any in the return
-# type of requires_instance-decorated methods that return Callable[P, R], which breaks the propagation of P
-_T = TypeVar("_T", bound="CallWrapperMixin")  # type: ignore[type-arg]
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-_F = TypeVar("_F", bound=Callable[..., Any])
-
 _CallWrapper = Callable[[Callable[..., Any]], Callable[..., Any]]
-# Where a with_xxx() wrapper composes relative to a multi-call wrapper (with_concurrency/with_repeat):
-# - "call": wraps each individual call inside the group (with_retry, with_expected_status, with_max_response_time,
-#   with_polling)
-# - "calls": wraps the whole group of calls as one unit (with_lock, with_stats)
+# Where a with_xxx() wrapper composes relative to a multi-call wrapper:
+# - "call": wraps each individual call inside the group (e.g. with_retry)
+# - "calls": wraps the whole group of calls as one unit (e.g. with_lock)
 _WrapperScope = Literal["call", "calls"]
 
 logger = get_logger(__name__)
 
 
-def _terminal(f: _F) -> _F:
-    """Mark a `with_xxx()` wrapper method as terminal.
-
-    Sets `._terminal_wrapper` on the returned `EndpointFunc` copy so that `_with_wrapper` can raise if any further
-    wrapper is chained after this one.
-    """
-
-    @wraps(f)
-    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        wrapped = f(self, *args, **kwargs)
-        wrapped._terminal_wrapper = f.__name__
-        return wrapped
-
-    return cast(_F, wrapper)
-
-
-def requires_instance(f: Callable[Concatenate[_T, _P], _R]) -> Callable[Concatenate[_T, _P], _R]:
-    @wraps(f)
-    def wrapper(self: _T, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        if self._instance is None:
-            func_name = self._original_func.__name__ if f.__name__ == "__call__" else f.__name__
-            raise TypeError(f"You cannot access {func_name}() directly through the {self._owner.__name__} class.")
-        return f(self, *args, **kwargs)
-
-    return wrapper
-
-
 class CallWrapperMixin(Generic[P]):
-    """Mixin providing the `with_xxx()` chainable call wrappers shared by sync and async endpoint funcs.
-
-    Expects to be mixed into a concrete `EndpointFunc` subclass, which provides the attributes declared below.
-    """
+    """Mixin providing the chainable call wrappers shared by sync and async endpoint funcs."""
 
     # Provided by EndpointFunc.__init__
     api_client: APIClient | None
@@ -83,12 +47,17 @@ class CallWrapperMixin(Generic[P]):
     _instance: BaseAPI[Any] | None
     _owner: type[BaseAPI[Any]]
     _original_func: Callable[..., RestResponse]
-    _base_call: Callable[..., Any] | None
-    _call_wrappers: tuple[tuple[_CallWrapper, _WrapperScope], ...]
-    _multi_call_wrapper: _CallWrapper | None  # with_concurrency() / with_repeat()
-    _outermost_wrapper: _CallWrapper | None  # with_pagination()
-    _terminal_wrapper: str | None
-    _expected_status_codes: tuple[int, ...]
+
+    def __init__(self) -> None:
+        """Initialize the wrapper-composition state used by `_build_call` to compose `with_xxx()` wrappers
+        in left-to-right (first=outermost) order."""
+        self._call_wrappers: tuple[tuple[_CallWrapper, _WrapperScope], ...] = ()
+        self._multi_call_wrapper: _CallWrapper | None = None  # with_concurrency() / with_repeat()
+        self._outermost_wrapper: _CallWrapper | None = None  # with_pagination()
+        self._base_call: Callable[..., Any] | None = None
+        self._terminal_wrapper: str | None = None
+        # Status codes declared via with_expected_status(), exempt from the client's raise_on_error
+        self._expected_status_codes: tuple[int, ...] = ()
 
     @requires_instance
     def with_retry(
@@ -351,7 +320,7 @@ class CallWrapperMixin(Generic[P]):
 
         return self._with_wrapper(chain_wrapper=(call_with_stats, "calls"))
 
-    @_terminal
+    @terminal
     @requires_instance
     def with_pagination(
         self, get_next: Callable[[RestResponse], dict[str, Any] | None], *, limit: int | None = None
@@ -464,7 +433,7 @@ class CallWrapperMixin(Generic[P]):
         for wrapper, scope in reversed(self._call_wrappers):
             if not is_multi_call or scope == "call":
                 call = wrapper(call)
-        if self.api_client is not None and self.api_client.raise_on_error:
+        if self._should_raise_on_error:
             call = self._make_raise_on_error_wrapper(call)
         if self._multi_call_wrapper is not None:
             call = self._multi_call_wrapper(call)
@@ -474,6 +443,25 @@ class CallWrapperMixin(Generic[P]):
         if self._outermost_wrapper is not None:
             call = self._outermost_wrapper(call)
         return call
+
+    @property
+    def _should_raise_on_error(self) -> bool:
+        """Whether the owning API client has `raise_on_error` enabled."""
+        return self.api_client is not None and self.api_client.raise_on_error
+
+    def _setup_base_call(self, cls: type[EndpointFunc[Any]]) -> None:
+        """Snapshot `cls.__call__` as the base call that `with_xxx()` wrappers compose around, applying
+        `raise_on_error` as the outermost layer on `cls.__call__` itself for the plain (non-chained) call path.
+
+        The `_base_call` snapshot must remain unwrapped so `_build_call` can compose fresh `with_xxx()` chains
+        around it and insert `raise_on_error` at the correct layer itself.
+
+        :param cls: The instance-private `EndpointFunc` subclass whose `__call__` has just been decorated with
+                   request/stream wrappers and any registered endpoint decorators
+        """
+        self._base_call = cls.__call__
+        if self._should_raise_on_error:
+            cls.__call__ = self._make_raise_on_error_wrapper(self._base_call)  # type: ignore[method-assign]
 
     def _make_raise_on_error_wrapper(self, f: Callable[..., Any]) -> Callable[..., Any]:
         """Return a sync or async wrapper that calls `raise_for_status()` on non-2xx responses.
@@ -509,7 +497,7 @@ class CallWrapperMixin(Generic[P]):
 
 
 class SyncCallWrapperMixin(CallWrapperMixin[P]):
-    """Mixin providing the sync `with_concurrency()`/`with_repeat()` multi-call wrappers."""
+    """Mixin providing the sync call wrappers."""
 
     @overload
     def with_concurrency(
@@ -519,7 +507,7 @@ class SyncCallWrapperMixin(CallWrapperMixin[P]):
     def with_concurrency(
         self, num: int = 2, *, max_connections: int | None = None, return_exceptions: Literal[True]
     ) -> Callable[P, _ResponseOrExceptionList]: ...
-    @_terminal
+    @terminal
     @requires_instance
     def with_concurrency(
         self, num: int = 2, *, max_connections: int | None = None, return_exceptions: bool = False
@@ -565,7 +553,7 @@ class SyncCallWrapperMixin(CallWrapperMixin[P]):
     def with_repeat(
         self, num: int = 2, *, return_exceptions: Literal[True]
     ) -> Callable[P, _ResponseOrExceptionList]: ...
-    @_terminal
+    @terminal
     @requires_instance
     def with_repeat(
         self, num: int = 2, *, return_exceptions: bool = False
@@ -611,7 +599,7 @@ class SyncCallWrapperMixin(CallWrapperMixin[P]):
 
 
 class AsyncCallWrapperMixin(CallWrapperMixin[P]):
-    """Mixin providing the async `with_concurrency()`/`with_repeat()` multi-call wrappers."""
+    """Mixin providing the async call wrappers."""
 
     @overload
     def with_concurrency(
@@ -621,7 +609,7 @@ class AsyncCallWrapperMixin(CallWrapperMixin[P]):
     def with_concurrency(
         self, num: int = 2, *, max_connections: int | None = None, return_exceptions: Literal[True]
     ) -> Callable[P, _ResponseOrExceptionList]: ...
-    @_terminal
+    @terminal
     @requires_instance
     def with_concurrency(
         self, num: int = 2, *, max_connections: int | None = None, return_exceptions: bool = False
@@ -687,7 +675,7 @@ class AsyncCallWrapperMixin(CallWrapperMixin[P]):
     def with_repeat(
         self, num: int = 2, *, return_exceptions: Literal[True]
     ) -> Callable[P, _ResponseOrExceptionList]: ...
-    @_terminal
+    @terminal
     @requires_instance
     def with_repeat(
         self, num: int = 2, *, return_exceptions: bool = False
