@@ -1,7 +1,8 @@
-"""Unit tests for endpoints_func.py
+"""Unit tests for endpoint_func.py
 
-NOTE: Any tests related to endpoint function calls (__call__, stream(), with_xxx()) should be tested in
-test_endpoint_func_call.py
+NOTE: Any tests related to endpoint function calls (__call__(), stream()) should be tested in
+test_endpoint_func_call.py, and any tests for with_xxx() chainable wrappers should be tested in
+test_endpoint_func_call_wrapper.py
 """
 
 import re

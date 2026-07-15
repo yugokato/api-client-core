@@ -1,10 +1,7 @@
-"""Unit tests for endpoints_func.py (func calls)"""
+"""Unit tests for endpoint_func.py with_xxx() chainable call wrappers"""
 
-import asyncio
 import re
 from collections.abc import Callable, Generator
-from contextlib import asynccontextmanager, contextmanager
-from functools import wraps
 from typing import Any, NoReturn
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -16,1454 +13,14 @@ from common_libs.clients.rest_client.types import Request, Response
 from common_libs.clients.rest_client.utils import set_request_to_exception
 from common_libs.lock import AsyncLock, Lock
 from filelock import Timeout as FileLockTimeout
-from httpx import AsyncClient, Client, ConnectError, HTTPError, HTTPStatusError
+from httpx import AsyncClient, Client, HTTPStatusError
 from pytest_mock import MockerFixture
 
-import api_client_core.endpoints.endpoint_func as _endpoint_func_module
-import api_client_core.endpoints.utils.endpoint_call as endpoint_call_util
+import api_client_core.endpoints.endpoint_func.call_wrapper_mixins as _call_wrapper_mixins_module
 from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints import AsyncEndpointFunc, Stats, SyncEndpointFunc, endpoint
-from api_client_core.endpoints.executors import AsyncExecutor, SyncExecutor
 from api_client_core.endpoints.stats import StatsCollector
 from api_client_core.types import Unset
-
-
-class TestSyncEndpointFuncCall:
-    """Tests for SyncEndpointFunc.__call__ sync execution path"""
-
-    def test_sync_call_returns_rest_response(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that SyncEndpointFunc.__call__ returns a RestResponse"""
-        mock_httpx_request = mocker.patch.object(Client, "request")
-        instance = api_class(api_client)
-        r = instance.get_something()
-        assert isinstance(r, RestResponse)
-        mock_httpx_request.assert_called_once()
-
-    def test_sync_call_uses_sync_executor(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that SyncEndpointFunc uses SyncExecutor to execute the HTTP request"""
-        mock_httpx_request = mocker.patch.object(Client, "request")
-        instance = api_class(api_client)
-        endpoint_func = instance.get_something
-        assert isinstance(endpoint_func, SyncEndpointFunc)
-        assert isinstance(endpoint_func.executor, SyncExecutor)
-
-        instance.get_something()
-        mock_httpx_request.assert_called_once()
-
-    def test_sync_call_invokes_pre_and_post_hooks(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that pre_request_hook and post_request_hook are called during sync execution"""
-        call_stack: list[str] = []
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            call_stack.append("call")
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(Client, "request", side_effect=mock_httpx_side_effect)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("pre")
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client)
-        instance.get_something()
-
-        assert call_stack == ["pre", "call", "post"]
-
-    @pytest.mark.parametrize("with_hooks", [True, False])
-    def test_sync_call_flow_with_decorators_and_wrappers(
-        self, mocker: MockerFixture, api_client: APIClient, with_hooks: bool
-    ) -> None:
-        """Test that endpoint decorators and request wrappers fire in correct order in sync mode"""
-        call_stack: list[str] = []
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            call_stack.append("call")
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(Client, "request", side_effect=mock_httpx_side_effect)
-
-        @endpoint.decorator
-        def deco1(f: Callable[..., Any]) -> Callable[..., Any]:
-            @wraps(f)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                call_stack.append("deco1_before")
-                result = f(*args, **kwargs)
-                call_stack.append("deco1_after")
-                return result
-
-            return wrapper
-
-        @endpoint.decorator
-        def deco2(f: Callable[..., Any]) -> Callable[..., Any]:
-            @wraps(f)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                call_stack.append("deco2_before")
-                result = f(*args, **kwargs)
-                call_stack.append("deco2_after")
-                return result
-
-            return wrapper
-
-        class SyncHookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("pre_request")
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post_request")
-
-            def request_wrapper(self) -> list[Callable[..., Any]]:
-                def request_wrapper1(f: Callable[..., Any]) -> Callable[..., Any]:
-                    @wraps(f)
-                    def inner(*args: Any, **kwargs: Any) -> Any:
-                        call_stack.append("request_wrapper1_before")
-                        result = f(*args, **kwargs)
-                        call_stack.append("request_wrapper1_after")
-                        return result
-
-                    return inner
-
-                def request_wrapper2(f: Callable[..., Any]) -> Callable[..., Any]:
-                    @wraps(f)
-                    def inner(*args: Any, **kwargs: Any) -> Any:
-                        call_stack.append("request_wrapper2_before")
-                        result = f(*args, **kwargs)
-                        call_stack.append("request_wrapper2_after")
-                        return result
-
-                    return inner
-
-                return [request_wrapper1, request_wrapper2]
-
-            @deco1
-            @deco2
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = SyncHookedAPI(api_client)
-        assert call_stack == []
-        instance.get_something(with_hooks=with_hooks)
-
-        if with_hooks:
-            assert call_stack == [
-                "deco1_before",
-                "deco2_before",
-                "request_wrapper1_before",
-                "request_wrapper2_before",
-                "pre_request",
-                "call",
-                "post_request",
-                "request_wrapper2_after",
-                "request_wrapper1_after",
-                "deco2_after",
-                "deco1_after",
-            ]
-        else:
-            assert call_stack == [
-                "deco1_before",
-                "deco2_before",
-                "request_wrapper1_before",
-                "request_wrapper2_before",
-                "call",
-                "request_wrapper2_after",
-                "request_wrapper1_after",
-                "deco2_after",
-                "deco1_after",
-            ]
-
-    def test_sync_call_with_single_callable_arg_factory_decorator(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that a registered decorator factory called with a single bare callable actually fires during a
-        sync call
-        """
-        mocker.patch.object(Client, "request")
-        call_stack: list[str] = []
-
-        @endpoint.decorator
-        def with_callback(
-            callback: Callable[[RestResponse], None],
-        ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-            def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
-                @wraps(f)
-                def wrapper(*args: Any, **kwargs: Any) -> Any:
-                    result = f(*args, **kwargs)
-                    callback(result)
-                    return result
-
-                return wrapper
-
-            return decorator
-
-        def record_response(response: RestResponse) -> None:
-            call_stack.append("callback")
-
-        class SyncCallbackAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/something")
-            @with_callback(record_response)
-            def get_something(self) -> RestResponse: ...
-
-        instance = SyncCallbackAPI(api_client)
-        r = instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        assert call_stack == ["callback"]
-
-    def test_sync_call_with_custom_body_returning_rest_response(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that a custom sync endpoint body returning RestResponse bypasses auto-generated request path"""
-        mocker.patch.object(Client, "request")
-        f = endpoint_call_util.generate_rest_func_params
-        spy_generate = mocker.patch(f"{f.__module__}.{f.__name__}")
-
-        class SyncCustomAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse:
-                return self.api_client.rest_client.get("/v1/something")
-
-        instance = SyncCustomAPI(api_client)
-        r = instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        spy_generate.assert_not_called()
-
-    def test_sync_call_with_custom_body_wrong_return_type(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that a custom sync endpoint body returning a non-RestResponse raises RuntimeError"""
-        mocker.patch.object(Client, "request")
-
-        class SyncBadReturnAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse:
-                return "not a response"
-
-        instance = SyncBadReturnAPI(api_client)
-        with pytest.raises(RuntimeError, match="Custom endpoint must return a RestResponse object, got str"):
-            instance.get_something()
-
-    def test_sync_call_http_error_propagates(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that HTTPError raised during sync execution propagates to the caller"""
-        mock_request = mocker.MagicMock(spec=Request)
-        connect_error = ConnectError("connection error")
-        connect_error.request = mock_request
-        mocker.patch.object(Client, "request", side_effect=connect_error)
-        instance = api_class(api_client)
-        with pytest.raises(HTTPError, match="connection error"):
-            instance.get_something()
-
-    def test_sync_call_http_error_still_runs_post_hook(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that post_request_hook is still called even when an HTTPError occurs in sync mode"""
-        post_hook_called = False
-        mock_request = mocker.MagicMock(spec=Request)
-        connect_error = ConnectError("timeout")
-        connect_error.request = mock_request
-
-        mocker.patch.object(Client, "request", side_effect=connect_error)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                nonlocal post_hook_called
-                post_hook_called = True
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client)
-        with pytest.raises(HTTPError):
-            instance.get_something()
-
-        assert post_hook_called is True
-
-    def test_sync_call_works_inside_running_event_loop(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that a sync endpoint call succeeds even when invoked from within a running event loop"""
-        mocker.patch.object(Client, "request")
-        instance = api_class(api_client)
-
-        async def _call() -> RestResponse:
-            return instance.get_something()
-
-        r = asyncio.run(_call())
-        assert isinstance(r, RestResponse)
-
-    def test_sync_call_supports_nested_endpoint_call(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that a custom sync endpoint body can call another sync endpoint (re-entrant call)"""
-        mocker.patch.object(Client, "request")
-
-        class NestedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/inner")
-            def get_inner(self) -> RestResponse: ...
-
-            @endpoint.get("/v1/outer")
-            def get_outer(self) -> RestResponse:
-                return self.get_inner()
-
-        instance = NestedAPI(api_client)
-        r = instance.get_outer()
-        assert isinstance(r, RestResponse)
-
-    def test_sync_with_concurrency_makes_multiple_calls(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that with_concurrency in sync mode issues N concurrent HTTP requests"""
-        mock_httpx_request = mocker.patch.object(Client, "request")
-        instance = api_class(api_client)
-        endpoint_func = instance.get_something
-
-        assert isinstance(endpoint_func, SyncEndpointFunc)
-
-        results = endpoint_func.with_concurrency(num=3)()
-        assert len(results) == 3
-        assert all(isinstance(r, RestResponse) for r in results)
-        assert mock_httpx_request.call_count == 3
-
-    def test_sync_with_concurrency_collects_exceptions_with_return_exceptions(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that with_concurrency(return_exceptions=True) collects all exceptions instead of propagating"""
-        mocker.patch.object(Client, "request", side_effect=ValueError("always fails"))
-        instance = api_class(api_client)
-
-        results = instance.get_something.with_concurrency(num=3, return_exceptions=True)()
-
-        assert len(results) == 3
-        assert all(isinstance(r, ValueError) for r in results)
-        assert Client.request.call_count == 3
-
-    def test_sync_with_concurrency_propagates_bare_exception(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that with_concurrency propagates a bare exception (not wrapped) when return_exceptions=False"""
-        mocker.patch.object(Client, "request", side_effect=ValueError("always fails"))
-        instance = api_class(api_client)
-
-        with pytest.raises(ValueError, match="always fails"):
-            instance.get_something.with_concurrency(num=3)()
-
-    def test_sync_call_uses_endpoint_path(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that the sync endpoint call uses the configured endpoint path"""
-        mock_httpx_request = mocker.patch.object(Client, "request")
-
-        class PathAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/items")
-            def get_items(self) -> RestResponse: ...
-
-        instance = PathAPI(api_client)
-        instance.get_items()
-
-        call_args = mock_httpx_request.call_args
-        assert call_args.args == ("GET", "/v1/items")
-
-    def test_sync_call_on_deprecated_endpoint_logs_warning(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that calling a deprecated endpoint logs a DEPRECATED warning"""
-        mocker.patch.object(Client, "request")
-        mock_log = mocker.patch.object(endpoint_call_util, "logger")
-
-        class DeprecatedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.is_deprecated
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = DeprecatedAPI(api_client)
-        instance.get_something()
-
-        warning_messages = [call[0][0] for call in mock_log.warning.call_args_list]
-        assert any("DEPRECATED" in msg for msg in warning_messages)
-
-
-class TestAsyncEndpointFuncCall:
-    """Tests for AsyncEndpointFunc.__call__ async execution path"""
-
-    async def test_async_call_returns_rest_response(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that AsyncEndpointFunc.__call__ returns a RestResponse when awaited"""
-        mocker.patch.object(AsyncClient, "request")
-        instance = api_class_async(api_client_async)
-        r = await instance.get_something()
-        assert isinstance(r, RestResponse)
-
-    async def test_async_call_uses_async_executor(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that AsyncEndpointFunc uses AsyncExecutor to execute the HTTP request"""
-        mock_httpx_request = mocker.patch.object(AsyncClient, "request")
-        instance = api_class_async(api_client_async)
-        endpoint_func = instance.get_something
-        assert isinstance(endpoint_func, AsyncEndpointFunc)
-        assert isinstance(endpoint_func.executor, AsyncExecutor)
-
-        await instance.get_something()
-        mock_httpx_request.assert_called_once()
-
-    async def test_async_call_invokes_pre_and_post_hooks(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that pre_request_hook and post_request_hook are called during async execution"""
-        call_stack: list[str] = []
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            call_stack.append("call")
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("pre")
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client_async)
-        await instance.get_something()
-
-        assert call_stack == ["pre", "call", "post"]
-
-    @pytest.mark.parametrize("with_hooks", [True, False])
-    async def test_async_call_flow_with_decorators_and_wrappers(
-        self, mocker: MockerFixture, api_client_async: APIClient, with_hooks: bool
-    ) -> None:
-        """Test that endpoint decorators and request wrappers fire in correct order in async mode"""
-        call_stack: list[str] = []
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            call_stack.append("call")
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
-
-        @endpoint.decorator
-        def deco1(f: Callable[..., Any]) -> Callable[..., Any]:
-            @wraps(f)
-            async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                call_stack.append("deco1_before")
-                result = await f(*args, **kwargs)
-                call_stack.append("deco1_after")
-                return result
-
-            return wrapper
-
-        @endpoint.decorator
-        def deco2(f: Callable[..., Any]) -> Callable[..., Any]:
-            @wraps(f)
-            async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                call_stack.append("deco2_before")
-                result = await f(*args, **kwargs)
-                call_stack.append("deco2_after")
-                return result
-
-            return wrapper
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("pre_request")
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post_request")
-
-            def request_wrapper(self) -> list[Callable[..., Any]]:
-                def request_wrapper1(f: Callable[..., Any]) -> Callable[..., Any]:
-                    @wraps(f)
-                    async def inner(*args: Any, **kwargs: Any) -> Any:
-                        call_stack.append("request_wrapper1_before")
-                        result = await f(*args, **kwargs)
-                        call_stack.append("request_wrapper1_after")
-                        return result
-
-                    return inner
-
-                def request_wrapper2(f: Callable[..., Any]) -> Callable[..., Any]:
-                    @wraps(f)
-                    async def inner(*args: Any, **kwargs: Any) -> Any:
-                        call_stack.append("request_wrapper2_before")
-                        result = await f(*args, **kwargs)
-                        call_stack.append("request_wrapper2_after")
-                        return result
-
-                    return inner
-
-                return [request_wrapper1, request_wrapper2]
-
-            @deco1
-            @deco2
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        assert call_stack == []
-        await instance.get_something(with_hooks=with_hooks)
-
-        if with_hooks:
-            assert call_stack == [
-                "deco1_before",
-                "deco2_before",
-                "request_wrapper1_before",
-                "request_wrapper2_before",
-                "pre_request",
-                "call",
-                "post_request",
-                "request_wrapper2_after",
-                "request_wrapper1_after",
-                "deco2_after",
-                "deco1_after",
-            ]
-        else:
-            assert call_stack == [
-                "deco1_before",
-                "deco2_before",
-                "request_wrapper1_before",
-                "request_wrapper2_before",
-                "call",
-                "request_wrapper2_after",
-                "request_wrapper1_after",
-                "deco2_after",
-                "deco1_after",
-            ]
-
-    async def test_async_call_with_single_callable_arg_factory_decorator(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that a registered decorator factory called with a single bare callable actually fires during an
-        async call
-        """
-        mocker.patch.object(AsyncClient, "request")
-        call_stack: list[str] = []
-
-        @endpoint.decorator
-        def with_callback(
-            callback: Callable[[RestResponse], None],
-        ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-            def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
-                @wraps(f)
-                async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                    result = await f(*args, **kwargs)
-                    callback(result)
-                    return result
-
-                return wrapper
-
-            return decorator
-
-        def record_response(response: RestResponse) -> None:
-            call_stack.append("callback")
-
-        class AsyncCallbackAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            @with_callback(record_response)
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncCallbackAPI(api_client_async)
-        r = await instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        assert call_stack == ["callback"]
-
-    async def test_async_call_with_custom_body_returning_rest_response(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that a custom async endpoint body returning RestResponse bypasses auto-generated request path"""
-        mocker.patch.object(AsyncClient, "request")
-        f = endpoint_call_util.generate_rest_func_params
-        spy_generate = mocker.patch(f"{f.__module__}.{f.__name__}")
-
-        class AsyncCustomAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse:
-                return self.api_client.rest_client.get("/v1/something")
-
-        instance = AsyncCustomAPI(api_client_async)
-        r = await instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        spy_generate.assert_not_called()
-
-    async def test_async_call_with_custom_body_wrong_return_type(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that a custom async endpoint body returning non-RestResponse raises RuntimeError"""
-        mocker.patch.object(AsyncClient, "request")
-
-        class AsyncBadReturnAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse:
-                return "not a response"
-
-        instance = AsyncBadReturnAPI(api_client_async)
-        with pytest.raises(RuntimeError, match="Custom endpoint must return a RestResponse object, got str"):
-            await instance.get_something()
-
-    async def test_async_call_http_error_propagates(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that HTTPError raised during async execution propagates to the caller"""
-        mock_request = mocker.MagicMock(spec=Request)
-        connect_error = ConnectError("connection error")
-        connect_error.request = mock_request
-        mocker.patch.object(AsyncClient, "request", side_effect=connect_error)
-        instance = api_class_async(api_client_async)
-        with pytest.raises(HTTPError, match="connection error"):
-            await instance.get_something()
-
-    async def test_async_call_http_error_still_runs_post_hook(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that post_request_hook is still called even when an HTTPError occurs in async mode"""
-        post_hook_called = False
-        mock_request = mocker.MagicMock(spec=Request)
-        connect_error = ConnectError("timeout")
-        connect_error.request = mock_request
-
-        mocker.patch.object(AsyncClient, "request", side_effect=connect_error)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                nonlocal post_hook_called
-                post_hook_called = True
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client_async)
-        with pytest.raises(HTTPError):
-            await instance.get_something()
-
-        assert post_hook_called is True
-
-    async def test_async_with_concurrency_makes_multiple_calls(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that with_concurrency in async mode issues N concurrent HTTP requests via asyncio.gather"""
-        mock_httpx_request = mocker.patch.object(AsyncClient, "request")
-        instance = api_class_async(api_client_async)
-        endpoint_func = instance.get_something
-
-        assert isinstance(endpoint_func, AsyncEndpointFunc)
-
-        results = await endpoint_func.with_concurrency(num=3)()
-        assert len(results) == 3
-        assert all(isinstance(r, RestResponse) for r in results)
-        assert mock_httpx_request.call_count == 3
-
-    async def test_async_with_concurrency_collects_exceptions_with_return_exceptions(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that async with_concurrency(return_exceptions=True) collects all exceptions instead of propagating"""
-        mocker.patch.object(AsyncClient, "request", side_effect=ValueError("always fails"))
-        instance = api_class_async(api_client_async)
-
-        results = await instance.get_something.with_concurrency(num=3, return_exceptions=True)()
-
-        assert len(results) == 3
-        assert all(isinstance(r, ValueError) for r in results)
-        assert AsyncClient.request.call_count == 3
-
-    async def test_async_with_concurrency_propagates_bare_exception(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that async with_concurrency propagates a bare exception when return_exceptions=False.
-
-        Confirms parity with the sync path: the exception should be a plain exception, not wrapped in
-        an ExceptionGroup.
-        """
-        mocker.patch.object(AsyncClient, "request", side_effect=ValueError("always fails"))
-        instance = api_class_async(api_client_async)
-
-        with pytest.raises(ValueError, match="always fails"):
-            await instance.get_something.with_concurrency(num=3)()
-
-    async def test_async_call_uses_endpoint_path(self, mocker: MockerFixture, api_client_async: APIClient) -> None:
-        """Test that the async endpoint call uses the configured endpoint path"""
-        mock_httpx_request = mocker.patch.object(AsyncClient, "request")
-
-        class PathAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/items")
-            def get_items(self) -> RestResponse: ...
-
-        instance = PathAPI(api_client_async)
-        await instance.get_items()
-
-        call_args = mock_httpx_request.call_args
-        assert call_args.args == ("GET", "/v1/items")
-
-
-class TestAsyncDefEndpointFuncCall:
-    """Tests for `async def` endpoint function on an async client"""
-
-    async def test_async_def_endpoint_empty_body_auto_generates_call(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an `async def` endpoint with an empty body auto-generates the REST call"""
-        mocker.patch.object(AsyncClient, "request")
-        spy_generate = mocker.spy(endpoint_call_util, "generate_rest_func_params")
-
-        class AsyncDefEmptyBodyAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse: ...
-
-        instance = AsyncDefEmptyBodyAPI(api_client_async)
-        r = await instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        spy_generate.assert_called_once()
-
-    async def test_async_def_endpoint_custom_body_can_await_and_inspect_response_inline(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an `async def` endpoint body can await the rest client and inspect the response inline"""
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
-        f = endpoint_call_util.generate_rest_func_params
-        spy_generate = mocker.patch(f"{f.__module__}.{f.__name__}")
-
-        class AsyncDefCustomBodyAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse:
-                r = await self.api_client.rest_client.get("/v1/something")
-                assert r.status_code == 200
-                return r
-
-        instance = AsyncDefCustomBodyAPI(api_client_async)
-        r = await instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        assert r.status_code == 200
-        spy_generate.assert_not_called()
-
-    async def test_async_def_endpoint_body_composes_with_configurable_wrapper(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an `async def` endpoint body composes with a chainable `with_xxx()` wrapper"""
-        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
-
-        class AsyncDefWrappedBodyAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse: ...
-
-        instance = AsyncDefWrappedBodyAPI(api_client_async)
-        r = await instance.get_something.with_retry().with_expected_status(200)()
-
-        assert isinstance(r, RestResponse)
-        assert r.status_code == 200
-
-    async def test_async_def_endpoint_custom_body_with_path_param_can_await_and_inspect_response_inline(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an `async def` endpoint body with a path parameter awaits the rest client, receives the split
-        path parameter, and inspects the response inline"""
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
-
-        class AsyncDefPathParamAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/users/{username}")
-            async def get_user(self, username: str) -> RestResponse:
-                r = await self.api_client.rest_client.get(f"/v1/users/{username}")
-                assert r.status_code == 200
-                return r
-
-        instance = AsyncDefPathParamAPI(api_client_async)
-        r = await instance.get_user("alice")
-
-        assert isinstance(r, RestResponse)
-        assert r.status_code == 200
-        call_args = AsyncClient.request.call_args
-        assert call_args.args == ("GET", "/v1/users/alice")
-
-    async def test_async_def_endpoint_custom_body_wrong_return_type_raises(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an `async def` endpoint body returning a non-RestResponse raises RuntimeError"""
-        mocker.patch.object(AsyncClient, "request")
-
-        class AsyncDefBadReturnAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse:
-                return "not a response"
-
-        instance = AsyncDefBadReturnAPI(api_client_async)
-        with pytest.raises(RuntimeError, match="Custom endpoint must return a RestResponse object, got str"):
-            await instance.get_something()
-
-    async def test_async_def_endpoint_streams_without_running_body(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that streaming an `async def` endpoint on an async client succeeds without executing the body"""
-        body_called = False
-        mock_resp = _make_stream_response()
-
-        @asynccontextmanager
-        async def fake_execute_stream(self_executor: AsyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class AsyncDefStreamAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse:
-                nonlocal body_called
-                body_called = True
-                return await self.api_client.rest_client.get("/v1/something")
-
-        instance = AsyncDefStreamAPI(api_client_async)
-        async with instance.get_something.stream() as r:
-            assert r is mock_resp
-
-        assert body_called is False
-
-
-class TestAsyncDefHooks:
-    """Tests for `async def` pre_request_hook / post_request_hook on an async client"""
-
-    async def test_async_def_pre_and_post_hooks_are_awaited(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that `async def` pre_request_hook and post_request_hook are awaited during async execution"""
-        call_stack: list[str] = []
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            call_stack.append("call")
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("pre")
-
-            async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        await instance.get_something()
-
-        assert call_stack == ["pre", "call", "post"]
-
-    async def test_async_def_pre_hook_exception_skips_call_and_post_hook(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an exception raised inside an `async def` pre_request_hook propagates and skips both the
-        request and post_request_hook"""
-        call_stack: list[str] = []
-
-        def mock_httpx_side_effect(*args: Any, **kwargs: Any) -> Response:
-            call_stack.append("call")
-            mock_response = mocker.MagicMock(spec=Response)
-            mock_response.status_code = 200
-            mock_response.is_stream = False
-            return mock_response
-
-        mocker.patch.object(AsyncClient, "request", side_effect=mock_httpx_side_effect)
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                raise ValueError("pre hook failed")
-
-            async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        with pytest.raises(ValueError, match="pre hook failed"):
-            await instance.get_something()
-
-        assert call_stack == []
-
-    async def test_async_def_post_hook_assertion_error_propagates(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that an AssertionError raised inside an `async def` post_request_hook propagates"""
-        mocker.patch.object(AsyncClient, "request")
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                raise AssertionError("hook assertion failed")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        with pytest.raises(AssertionError, match="hook assertion failed"):
-            await instance.get_something()
-
-    async def test_async_def_post_hook_other_exception_is_logged_not_propagated(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that a non-AssertionError raised inside an `async def` post_request_hook is logged, not propagated"""
-        mocker.patch.object(AsyncClient, "request")
-        mock_log = mocker.patch.object(_endpoint_func_module, "logger")
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                raise ValueError("hook failed")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        r = await instance.get_something()
-
-        assert isinstance(r, RestResponse)
-        mock_log.exception.assert_called_once()
-
-    async def test_async_def_pre_and_post_hooks_are_awaited_during_stream(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that `async def` pre_request_hook and post_request_hook are awaited during an async stream"""
-        call_stack: list[str] = []
-        mock_resp = _make_stream_response()
-
-        @asynccontextmanager
-        async def fake_execute_stream(self_executor: AsyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            call_stack.append("call")
-            yield mock_resp
-
-        mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("pre")
-
-            async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                call_stack.append("post")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        async with instance.get_something.stream():
-            pass
-
-        assert call_stack == ["pre", "call", "post"]
-
-
-class TestAsyncOnlyRejectedOnSyncClient:
-    """Tests that `async def` endpoint functions/hooks are rejected on a sync client"""
-
-    def test_async_def_endpoint_on_sync_client_raises(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that calling an `async def` endpoint on a sync client raises RuntimeError"""
-        mocker.patch.object(Client, "request")
-
-        class AsyncOnlyAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse: ...
-
-        instance = AsyncOnlyAPI(api_client)
-        with pytest.raises(RuntimeError, match=r"`AsyncOnlyAPI\.get_something` is defined with `async def`"):
-            instance.get_something()
-
-    def test_async_def_endpoint_on_sync_client_stream_raises(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that streaming an `async def` endpoint on a sync client raises RuntimeError"""
-        mocker.patch.object(Client, "request")
-
-        class AsyncOnlyAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/something")
-            async def get_something(self) -> RestResponse: ...
-
-        instance = AsyncOnlyAPI(api_client)
-        with pytest.raises(RuntimeError, match=r"`AsyncOnlyAPI\.get_something` is defined with `async def`"):
-            with instance.get_something.stream():
-                pass
-
-    def test_async_def_pre_request_hook_on_sync_client_raises(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that an `async def` pre_request_hook on a sync client raises RuntimeError"""
-        mocker.patch.object(Client, "request")
-
-        class AsyncHookAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookAPI(api_client)
-        with pytest.raises(RuntimeError, match=r"`AsyncHookAPI\.pre_request_hook` is defined with `async def`"):
-            instance.get_something()
-
-    def test_async_def_pre_request_hook_on_sync_client_raises_even_with_hooks_disabled(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that an `async def` pre_request_hook on a sync client raises RuntimeError even when
-        with_hooks=False, since the rejection does not depend on hook execution"""
-        mocker.patch.object(Client, "request")
-
-        class AsyncHookAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            async def pre_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookAPI(api_client)
-        with pytest.raises(RuntimeError, match=r"`AsyncHookAPI\.pre_request_hook` is defined with `async def`"):
-            instance.get_something(with_hooks=False)
-
-    def test_async_def_post_request_hook_on_sync_client_raises(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that an `async def` post_request_hook on a sync client raises RuntimeError"""
-        mocker.patch.object(Client, "request")
-
-        class AsyncHookAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            async def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                pass
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookAPI(api_client)
-        with pytest.raises(RuntimeError, match=r"`AsyncHookAPI\.post_request_hook` is defined with `async def`"):
-            instance.get_something()
-
-
-class TestSyncEndpointFuncStreamCall:
-    """Tests for SyncEndpointFunc.stream()"""
-
-    def test_sync_stream_yields_rest_response(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that stream() context manager yields a RestResponse"""
-        mock_resp = _make_stream_response()
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-        instance = api_class(api_client)
-        with instance.get_something.stream() as r:
-            assert r is mock_resp
-
-    def test_sync_stream_on_deprecated_endpoint_logs_warning(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that streaming a deprecated endpoint logs a DEPRECATED warning"""
-        mock_resp = _make_stream_response()
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-        mock_log = mocker.patch.object(endpoint_call_util, "logger")
-
-        class DeprecatedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.is_deprecated
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = DeprecatedAPI(api_client)
-        with instance.get_something.stream():
-            pass
-
-        warning_messages = [call[0][0] for call in mock_log.warning.call_args_list]
-        assert any("DEPRECATED" in msg for msg in warning_messages)
-
-    def test_sync_stream_http_error_propagates(
-        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
-    ) -> None:
-        """Test that an HTTPError raised inside stream() propagates to the caller"""
-        mock_request = mocker.MagicMock(spec=Request)
-        connect_error = ConnectError("stream connection failed")
-        connect_error.request = mock_request
-
-        class _RaisingCM:
-            def __enter__(self) -> Any:
-                raise connect_error
-
-            def __exit__(self, *args: Any) -> None:
-                pass
-
-        mocker.patch.object(SyncExecutor, "execute_stream", return_value=_RaisingCM())
-        instance = api_class(api_client)
-        with pytest.raises(HTTPError, match="stream connection failed"):
-            with instance.get_something.stream():
-                pass
-
-    def test_sync_stream_post_hook_called_after_success(self, mocker: MockerFixture, api_client: APIClient) -> None:
-        """Test that post_request_hook is called after a successful stream"""
-        post_called = False
-        mock_resp = _make_stream_response()
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                nonlocal post_called
-                post_called = True
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client)
-        with instance.get_something.stream():
-            pass
-
-        assert post_called is True
-
-    def test_sync_stream_post_hook_skipped_on_non_http_exception(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that post_request_hook is skipped when a non-HTTPError exception is raised inside stream()"""
-        post_called = False
-        mock_resp = _make_stream_response()
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                nonlocal post_called
-                post_called = True
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client)
-        caught: Exception | None = None
-        try:
-            with instance.get_something.stream():
-                raise ValueError("deliberate")
-        except ValueError as e:
-            caught = e
-
-        assert caught is not None and str(caught) == "deliberate"
-        assert post_called is False
-
-    def test_sync_stream_post_hook_assertion_error_propagates(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that an AssertionError raised inside post_request_hook during a sync stream propagates"""
-        mock_resp = _make_stream_response()
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                raise AssertionError("hook assertion failed")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client)
-        with pytest.raises(AssertionError, match="hook assertion failed"):
-            with instance.get_something.stream():
-                pass
-
-    def test_sync_stream_post_hook_other_exception_is_logged_not_propagated(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that a non-AssertionError raised inside post_request_hook during a sync stream is logged, not
-        propagated"""
-        mock_resp = _make_stream_response()
-        mock_log = mocker.patch.object(_endpoint_func_module, "logger")
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class HookedAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                raise ValueError("hook failed")
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = HookedAPI(api_client)
-        with instance.get_something.stream() as r:
-            assert r is mock_resp
-
-        mock_log.exception.assert_called_once()
-
-    def test_sync_stream_merges_signature_defaults_into_payload(
-        self, mocker: MockerFixture, api_client: APIClient
-    ) -> None:
-        """Test that stream() merges signature defaults into the payload via get_signature_defaults"""
-        captured_params: dict[str, Any] = {}
-
-        @contextmanager
-        def fake_execute_stream(self_executor: SyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            captured_params.update(params)
-            yield _make_stream_response()
-
-        mocker.patch.object(SyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class DefaultsAPI(BaseAPI):
-            app_name = api_client.app_name
-
-            @endpoint.get("/v1/items")
-            def list_items(self, *, page: int = 1, per_page: int = Unset) -> RestResponse: ...
-
-        instance = DefaultsAPI(api_client)
-        with instance.list_items.stream():
-            pass
-
-        # page=1 default should appear. per_page=Unset should be excluded
-        assert captured_params.get("json", captured_params.get("params", {})).get("page") == 1 or (
-            # generate_rest_func_params puts params inside json/params key. Check the raw call
-            True  # verified via spy below
-        )
-        # Use spy to capture the merged payload sent to generate_rest_func_params
-        spy_params: list[Any] = []
-        original_generate = endpoint_call_util.generate_rest_func_params
-
-        def capturing_generate(ep: Any, params: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
-            spy_params.append(params)
-            return original_generate(ep, params, *args, **kwargs)
-
-        mocker.patch.object(
-            __import__(endpoint_call_util.__name__, fromlist=["generate_rest_func_params"]),
-            "generate_rest_func_params",
-            side_effect=capturing_generate,
-        )
-
-        with instance.list_items.stream():
-            pass
-
-        assert spy_params, "generate_rest_func_params was not called"
-        merged = spy_params[0]
-        assert merged.get("page") == 1
-        assert "per_page" not in merged
-
-
-class TestAsyncEndpointFuncStreamCall:
-    """Tests for AsyncEndpointFunc.stream()"""
-
-    async def test_async_stream_yields_rest_response(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that async stream() context manager yields a RestResponse"""
-        mock_resp = _make_stream_response()
-
-        @asynccontextmanager
-        async def fake_execute_stream(self_executor: AsyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
-        instance = api_class_async(api_client_async)
-        async with instance.get_something.stream() as r:
-            assert r is mock_resp
-
-    async def test_async_stream_http_error_propagates(
-        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
-    ) -> None:
-        """Test that an HTTPError raised inside async stream() propagates to the caller"""
-        mock_request = mocker.MagicMock(spec=Request)
-        connect_error = ConnectError("async stream connection failed")
-        connect_error.request = mock_request
-
-        class _AsyncRaisingCM:
-            async def __aenter__(self) -> Any:
-                raise connect_error
-
-            async def __aexit__(self, *args: Any) -> None:
-                pass
-
-        mocker.patch.object(AsyncExecutor, "execute_stream", return_value=_AsyncRaisingCM())
-        instance = api_class_async(api_client_async)
-        with pytest.raises(HTTPError, match="async stream connection failed"):
-            async with instance.get_something.stream():
-                pass
-
-    async def test_async_stream_post_hook_called_after_success(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that post_request_hook is called after a successful async stream"""
-        post_called = False
-        mock_resp = _make_stream_response()
-
-        @asynccontextmanager
-        async def fake_execute_stream(self_executor: AsyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                nonlocal post_called
-                post_called = True
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        async with instance.get_something.stream():
-            pass
-
-        assert post_called is True
-
-    async def test_async_stream_post_hook_skipped_on_non_http_exception(
-        self, mocker: MockerFixture, api_client_async: APIClient
-    ) -> None:
-        """Test that post_request_hook is skipped on a non-HTTPError in async stream()"""
-        post_called = False
-        mock_resp = _make_stream_response()
-
-        @asynccontextmanager
-        async def fake_execute_stream(self_executor: AsyncExecutor, ef: Any, path: str, params: dict[str, Any]) -> Any:
-            yield mock_resp
-
-        mocker.patch.object(AsyncExecutor, "execute_stream", new=fake_execute_stream)
-
-        class AsyncHookedAPI(BaseAPI):
-            app_name = api_client_async.app_name
-
-            def post_request_hook(self, *args: Any, **kwargs: Any) -> None:
-                nonlocal post_called
-                post_called = True
-
-            @endpoint.get("/v1/something")
-            def get_something(self) -> RestResponse: ...
-
-        instance = AsyncHookedAPI(api_client_async)
-        caught: Exception | None = None
-        try:
-            async with instance.get_something.stream():
-                raise RuntimeError("deliberate async")
-        except RuntimeError as e:
-            caught = e
-
-        assert caught is not None and str(caught) == "deliberate async"
-        assert post_called is False
 
 
 class TestEndpointFuncCallWithLock:
@@ -1474,7 +31,7 @@ class TestEndpointFuncCallWithLock:
     ) -> None:
         """Test that with_lock auto-generates a lock name as '{app_name}-{APIClass}.{func_name}'"""
         mocker.patch.object(Client, "request")
-        mock_lock = mocker.patch(f"{SyncEndpointFunc.__module__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -1489,7 +46,7 @@ class TestEndpointFuncCallWithLock:
     ) -> None:
         """Test that explicitly providing lock_name overrides the auto-generated name"""
         mocker.patch.object(Client, "request")
-        mock_lock = mocker.patch(f"{SyncEndpointFunc.__module__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -1518,7 +75,7 @@ class TestEndpointFuncCallWithLock:
 
         mock_request.side_effect = _request_side_effect
 
-        mock_lock_cls = mocker.patch(f"{SyncEndpointFunc.__module__}.{Lock.__name__}")
+        mock_lock_cls = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
         mock_lock_instance = mocker.MagicMock()
         mock_lock_cls.return_value = mock_lock_instance
         mock_lock_instance.__enter__ = mocker.MagicMock(side_effect=lambda: call_order.append("lock_enter"))
@@ -1549,7 +106,7 @@ class TestEndpointFuncCallWithLock:
 
         mock_request.side_effect = _request_side_effect
 
-        mock_lock_cls = mocker.patch(f"{SyncEndpointFunc.__module__}.{AsyncLock.__name__}")
+        mock_lock_cls = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{AsyncLock.__name__}")
         mock_lock_instance = mocker.MagicMock()
         mock_lock_cls.return_value = mock_lock_instance
         mock_lock_instance.__aenter__.side_effect = lambda: call_order.append("lock_enter")
@@ -1565,7 +122,7 @@ class TestEndpointFuncCallWithLock:
     ) -> None:
         """Test that with_lock returns a RestResponse"""
         mocker.patch.object(Client, "request")
-        mock_lock = mocker.patch(f"{SyncEndpointFunc.__module__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -1696,7 +253,7 @@ class TestEndpointFuncCallWithRetrySync:
         self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that with_retry passes the correct keyword arguments to retry_on"""
-        mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -1717,7 +274,7 @@ class TestEndpointFuncCallWithRetrySync:
         self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True is forwarded to retry_on"""
-        mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -1765,7 +322,7 @@ class TestEndpointFuncCallWithRetryAsync:
         self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that async with_retry passes async_mode=True to retry_on"""
-        mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -1785,7 +342,7 @@ class TestEndpointFuncCallWithRetryAsync:
         self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
         """Test that safe_methods_only=True is forwarded to retry_on"""
-        mock_retry_on = mocker.patch(f"{SyncEndpointFunc.__module__}.{retry_on.__name__}")
+        mock_retry_on = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{retry_on.__name__}")
         identity: Callable[..., Any] = lambda f: f
         mock_retry_on.return_value = identity
 
@@ -2135,11 +692,11 @@ class TestEndpointFuncCallWithPolling:
                 _make_httpx_response(200, mocker),
             ],
         )
-        # Patch time in endpoint_func's namespace only so asyncio's internal time.monotonic() is unaffected.
+        # Patch time in call_wrapper_mixins's namespace only so asyncio's internal time.monotonic() is unaffected.
         # Return values: deadline_call=0.0, check_after_1st_poll=1.0, check_after_2nd_poll=2.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 1.0, 2.0]
-        mocker.patch.object(_endpoint_func_module, "time", mock_time)
+        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
         instance = api_class(api_client)
         r = instance.get_something.with_polling(until=lambda resp: resp.status_code == 200, interval=0.5, timeout=60)()
         assert isinstance(r, RestResponse)
@@ -2156,7 +713,7 @@ class TestEndpointFuncCallWithPolling:
         # deadline = 0.0 + 5 = 5.0. After one failed poll, monotonic returns 10.0 → 10.0 + 0.1 >= 5.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 10.0]
-        mocker.patch.object(_endpoint_func_module, "time", mock_time)
+        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
         instance = api_class(api_client)
         with pytest.raises(TimeoutError, match="Polling condition was not met within 5 seconds"):
             instance.get_something.with_polling(until=lambda resp: resp.status_code == 200, interval=0.1, timeout=5)()
@@ -2180,7 +737,7 @@ class TestEndpointFuncCallWithPolling:
         # Simulate: t=0 (start), t=0.1 (after first call), t=0.9 (after sleep), t=1.1 (after second call → expired)
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 0.1, 0.9, 1.1]
-        mocker.patch.object(_endpoint_func_module, "time", mock_time)
+        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
         sleep_mock = mock_time.sleep
 
         call_count = 0
@@ -2224,11 +781,11 @@ class TestEndpointFuncCallWithPolling:
             ],
         )
         mock_sleep = mocker.patch("asyncio.sleep")
-        # Patch time in endpoint_func's namespace only so asyncio's internal time.monotonic() is unaffected.
+        # Patch time in call_wrapper_mixins's namespace only so asyncio's internal time.monotonic() is unaffected.
         # Return values: deadline_call=0.0, check_after_1st_poll=1.0, check_after_2nd_poll=2.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 1.0, 2.0]
-        mocker.patch.object(_endpoint_func_module, "time", mock_time)
+        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
         instance = api_class_async(api_client_async)
         r = await instance.get_something.with_polling(
             until=lambda resp: resp.status_code == 200, interval=0.5, timeout=60
@@ -2248,7 +805,7 @@ class TestEndpointFuncCallWithPolling:
         # deadline = 0.0 + 5 = 5.0. After one failed poll, monotonic returns 10.0 → 10.0 + 0.1 >= 5.0
         mock_time = mocker.MagicMock()
         mock_time.monotonic.side_effect = [0.0, 10.0]
-        mocker.patch.object(_endpoint_func_module, "time", mock_time)
+        mocker.patch.object(_call_wrapper_mixins_module, "time", mock_time)
         instance = api_class_async(api_client_async)
         with pytest.raises(TimeoutError, match="Polling condition was not met within 5 seconds"):
             await instance.get_something.with_polling(
@@ -2272,7 +829,7 @@ class TestEndpointFuncCallWithChaining:
             "request",
             side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
         )
-        mock_lock = mocker.patch(f"{SyncEndpointFunc.__module__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -2297,7 +854,7 @@ class TestEndpointFuncCallWithChaining:
             "request",
             side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
         )
-        mock_lock = mocker.patch(f"{SyncEndpointFunc.__module__}.{Lock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
         mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
         mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
 
@@ -2322,7 +879,7 @@ class TestEndpointFuncCallWithChaining:
             "request",
             side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
         )
-        mock_lock = mocker.patch(f"{SyncEndpointFunc.__module__}.{AsyncLock.__name__}")
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{AsyncLock.__name__}")
 
         instance = api_class_async(api_client_async)
         r = await instance.get_something.with_lock().with_retry(condition=503, num_retries=1, retry_after=0)()
@@ -2367,8 +924,169 @@ class TestEndpointFuncCallWithChaining:
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
+    def test_sync_with_expected_status_then_with_repeat_asserts_each_call(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_expected_status().with_repeat() asserts the status of each individual call in the group"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class(api_client)
+
+        results = instance.get_something.with_expected_status(404).with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 404 for r in results)
+
+    def test_sync_with_expected_status_then_with_repeat_raises_on_unexpected_status(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_expected_status().with_repeat() raises AssertionError when a call in the group returns
+        an unexpected status"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(500, mocker))
+        instance = api_class(api_client)
+
+        with pytest.raises(AssertionError, match="Expected status code 404"):
+            instance.get_something.with_expected_status(404).with_repeat(num=2)()
+
+    def test_sync_with_expected_status_then_with_repeat_collects_assertion_errors_when_return_exceptions(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_expected_status().with_repeat(return_exceptions=True) collects the per-call
+        AssertionError for each call with an unexpected status"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(500, mocker))
+        instance = api_class(api_client)
+
+        results = instance.get_something.with_expected_status(404).with_repeat(num=2, return_exceptions=True)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, AssertionError) for r in results)
+
+    def test_sync_with_retry_then_with_repeat_retries_each_call(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_retry().with_repeat() retries each individual call in the group on a matching status"""
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[
+                _make_httpx_response(503, mocker),
+                _make_httpx_response(200, mocker),
+                _make_httpx_response(200, mocker),
+            ],
+        )
+        instance = api_class(api_client)
+
+        results = instance.get_something.with_retry(condition=503, num_retries=1, retry_after=0).with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 200 for r in results)
+        # First call: 503 then a retried 200. Second call: 200 on the first attempt
+        assert Client.request.call_count == 3
+
+    def test_sync_with_retry_on_exception_then_with_repeat_retries_failing_call_only(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_retry() with an exception condition chained before with_repeat() retries only the
+        failing individual call, not the whole group"""
+        call_count = 0
+
+        def request_side_effect(*a: Any, **kw: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("transient error")
+            return _make_httpx_response(200, mocker)
+
+        mocker.patch.object(Client, "request", side_effect=request_side_effect)
+        instance = api_class(api_client)
+
+        endpoint_func = instance.get_something.with_retry(condition=ValueError, num_retries=1, retry_after=0)
+        results = endpoint_func.with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 200 for r in results)
+        # First call: failed then retried. Second call: succeeded on the first attempt
+        assert call_count == 3
+
+    def test_sync_with_max_response_time_then_with_concurrency_asserts_each_call(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_max_response_time().with_concurrency() asserts the response time of each individual
+        call in the group"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        instance = api_class(api_client)
+
+        results = instance.get_something.with_max_response_time(1000).with_concurrency(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 200 for r in results)
+
+    def test_sync_with_polling_then_with_repeat_polls_each_call(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_polling().with_repeat() polls each individual call in the group until the condition
+        is met"""
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[
+                _make_httpx_response(503, mocker),
+                _make_httpx_response(200, mocker),
+                _make_httpx_response(200, mocker),
+            ],
+        )
+        mocker.patch("time.sleep")
+        instance = api_class(api_client)
+
+        results = instance.get_something.with_polling(until=lambda resp: resp.ok, timeout=60).with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 200 for r in results)
+        # First call: polled twice (503 then 200). Second call: 200 on the first poll
+        assert Client.request.call_count == 3
+
+    def test_sync_with_lock_and_with_retry_then_with_repeat_composes_by_scope(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that chaining group and per-call wrappers before with_repeat() holds the lock around the whole
+        group while retrying each individual call"""
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[
+                _make_httpx_response(503, mocker),
+                _make_httpx_response(200, mocker),
+                _make_httpx_response(200, mocker),
+            ],
+        )
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
+        mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
+        instance = api_class(api_client)
+
+        endpoint_func = instance.get_something.with_lock().with_retry(condition=503, num_retries=1, retry_after=0)
+        results = endpoint_func.with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 200 for r in results)
+        # The lock (group scope) is acquired once for the whole group, while retry (call scope) runs per call
+        assert mock_lock.call_count == 1
+        assert Client.request.call_count == 3
+
+    async def test_async_with_expected_status_then_with_concurrency_asserts_each_call(
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
+    ) -> None:
+        """Test that async with_expected_status().with_concurrency() asserts the status of each individual call
+        in the group"""
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class_async(api_client_async)
+
+        results = await instance.get_something.with_expected_status(404).with_concurrency(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 404 for r in results)
+
     def test_sync_terminal_wrapper_in_the_middle_raises(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
-        """Test that chaining any wrapper after a terminal one raises TypeError at chain-build time."""
+        """Test that chaining any wrapper after a terminal one raises RuntimeError at chain-build time."""
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_concurrency().with_retry()
@@ -2376,7 +1094,7 @@ class TestEndpointFuncCallWithChaining:
     def test_sync_terminal_wrapper_after_another_terminal_raises(
         self, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
-        """Test that chaining a second terminal wrapper after the first raises TypeError."""
+        """Test that chaining a second terminal wrapper after the first raises RuntimeError."""
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_concurrency().with_repeat()
@@ -2384,7 +1102,7 @@ class TestEndpointFuncCallWithChaining:
     def test_sync_repeat_terminal_wrapper_in_the_middle_raises(
         self, api_client: APIClient, api_class: type[BaseAPI]
     ) -> None:
-        """Test that chaining any wrapper after with_repeat() raises TypeError."""
+        """Test that chaining any wrapper after with_repeat() raises RuntimeError."""
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_repeat().with_expected_status(200)
@@ -2392,7 +1110,7 @@ class TestEndpointFuncCallWithChaining:
     async def test_async_terminal_wrapper_in_the_middle_raises(
         self, api_client_async: APIClient, api_class_async: type[BaseAPI]
     ) -> None:
-        """Test that chaining any wrapper after a terminal one raises TypeError in async mode."""
+        """Test that chaining any wrapper after a terminal one raises RuntimeError in async mode."""
         instance = api_class_async(api_client_async)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_concurrency().with_retry()
@@ -2819,6 +1537,229 @@ class TestEndpointFuncCallRaiseOnError:
         assert r.status_code == 200
         assert AsyncClient.request.call_count == 2
 
+    def test_sync_raise_on_error_with_concurrency_returns_responses_on_2xx(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that raise_on_error=True with with_concurrency returns all responses when every call is 2xx"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        instance = api_class(client)
+
+        results = instance.get_something.with_concurrency(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) for r in results)
+
+    def test_sync_raise_on_error_with_concurrency_collects_errors_when_return_exceptions(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that raise_on_error=True applies per call inside with_concurrency, so return_exceptions=True
+        collects the raised HTTPStatusError for each non-2xx call"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class(client)
+
+        results = instance.get_something.with_concurrency(num=2, return_exceptions=True)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, HTTPStatusError) for r in results)
+
+    def test_sync_raise_on_error_with_repeat_raises_per_call_on_non_2xx(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that raise_on_error=True with with_repeat raises on the first failing call in the group"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[
+                _make_httpx_response(200, mocker),
+                _make_httpx_response(404, mocker),
+                _make_httpx_response(200, mocker),
+            ],
+        )
+        instance = api_class(client)
+
+        with pytest.raises(HTTPStatusError):
+            instance.get_something.with_repeat(num=3)()
+
+        assert Client.request.call_count == 2
+
+    def test_sync_raise_on_error_with_lock_chained_before_repeat_holds_lock_around_group(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that a wrapper chained before a multi-call wrapper still wraps the whole group while
+        raise_on_error fires per call inside it"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[_make_httpx_response(200, mocker), _make_httpx_response(404, mocker)],
+        )
+        mock_lock = mocker.patch(f"{_call_wrapper_mixins_module.__name__}.{Lock.__name__}")
+        mock_lock.return_value.__enter__ = mocker.MagicMock(return_value=None)
+        mock_lock.return_value.__exit__ = mocker.MagicMock(return_value=False)
+        instance = api_class(client)
+
+        with pytest.raises(HTTPStatusError):
+            instance.get_something.with_lock().with_repeat(num=2)()
+
+        mock_lock.assert_called_once()
+        assert Client.request.call_count == 2
+
+    async def test_async_raise_on_error_with_concurrency_returns_responses_on_2xx(
+        self, mocker: MockerFixture, api_class_async: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that async raise_on_error=True with with_concurrency returns all responses when every call is 2xx"""
+        client = api_client_factory(async_mode=True, raise_on_error=True)
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
+        instance = api_class_async(client)
+
+        results = await instance.get_something.with_concurrency(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) for r in results)
+
+    async def test_async_raise_on_error_with_repeat_collects_errors_when_return_exceptions(
+        self, mocker: MockerFixture, api_class_async: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that async raise_on_error=True applies per call inside with_repeat, so return_exceptions=True
+        collects the raised HTTPStatusError for each non-2xx call"""
+        client = api_client_factory(async_mode=True, raise_on_error=True)
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class_async(client)
+
+        results = await instance.get_something.with_repeat(num=2, return_exceptions=True)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, HTTPStatusError) for r in results)
+
+    def test_sync_raise_on_error_with_expected_status_returns_expected_non_2xx(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that a non-2xx status declared via with_expected_status is exempt from raise_on_error"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class(client)
+
+        r = instance.get_something.with_expected_status(404)()
+
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 404
+
+    def test_sync_raise_on_error_with_expected_status_raises_assertion_error_for_unexpected_status(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that an unexpected status on a with_expected_status chain raises AssertionError from the
+        status check (which sits inside the raise wrapper, so HTTPStatusError is never reached)"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(500, mocker))
+        instance = api_class(client)
+
+        with pytest.raises(AssertionError, match="Expected status code 404"):
+            instance.get_something.with_expected_status(404)()
+
+    def test_sync_raise_on_error_with_expected_status_exemption_propagates_through_chaining(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that the expected-status exemption survives further with_xxx() chaining"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class(client)
+
+        r = instance.get_something.with_expected_status(404).with_retry(condition=503, num_retries=1, retry_after=0)()
+
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 404
+
+    def test_sync_raise_on_error_original_endpoint_func_is_unaffected_by_with_expected_status(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that with_expected_status only exempts the returned copy, not the original endpoint func"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class(client)
+
+        endpoint_func = instance.get_something
+        endpoint_func.with_expected_status(404)  # discard the returned copy
+
+        with pytest.raises(HTTPStatusError):
+            endpoint_func()
+
+    async def test_async_raise_on_error_with_expected_status_returns_expected_non_2xx(
+        self, mocker: MockerFixture, api_class_async: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that async mode exempts a non-2xx status declared via with_expected_status from raise_on_error"""
+        client = api_client_factory(async_mode=True, raise_on_error=True)
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class_async(client)
+
+        r = await instance.get_something.with_expected_status(404)()
+
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 404
+
+    def test_sync_raise_on_error_with_expected_status_chained_before_repeat_returns_expected_non_2xx(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that the expected-status exemption applies to each individual call in a with_repeat() group"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(404, mocker))
+        instance = api_class(client)
+
+        results = instance.get_something.with_expected_status(404).with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 404 for r in results)
+
+    def test_sync_raise_on_error_with_expected_status_chained_before_repeat_mixed_statuses(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that within a with_repeat() group, the expected-status exemption and assertion both apply per
+        call: a call with the expected status is exempt and returned, while a call with a different non-2xx
+        status fails its own assertion instead of being exempted by the other call's outcome"""
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[_make_httpx_response(404, mocker), _make_httpx_response(503, mocker)],
+        )
+        instance = api_class(client)
+
+        results = instance.get_something.with_expected_status(404).with_repeat(num=2, return_exceptions=True)()
+
+        assert len(results) == 2
+        assert isinstance(results[0], RestResponse)
+        assert results[0].status_code == 404
+        assert isinstance(results[1], AssertionError)
+
+    def test_sync_raise_on_error_with_retry_chained_before_repeat_sees_responses(
+        self, mocker: MockerFixture, api_class: type[BaseAPI], api_client_factory: Any
+    ) -> None:
+        """Test that raise_on_error=True with with_retry().with_repeat() still retries per call on matching
+        responses.
+
+        The per-call raise must fire AFTER retry has consumed responses, not before. A 503-then-200 sequence
+        within the group must retry and succeed rather than raising on the 503.
+        """
+        client = api_client_factory(raise_on_error=True)
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[
+                _make_httpx_response(503, mocker),
+                _make_httpx_response(200, mocker),
+                _make_httpx_response(200, mocker),
+            ],
+        )
+        instance = api_class(client)
+
+        results = instance.get_something.with_retry(condition=503, num_retries=1, retry_after=0).with_repeat(num=2)()
+
+        assert len(results) == 2
+        assert all(isinstance(r, RestResponse) and r.status_code == 200 for r in results)
+        assert Client.request.call_count == 3
+
 
 class TestEndpointFuncCallWithPagination:
     """Tests for with_pagination() — lazily paginated API calls driven by a get_next callback"""
@@ -3154,14 +2095,6 @@ class TestEndpointFuncCallWithPagination:
         instance = api_class(api_client)
         with pytest.raises(RuntimeError, match="terminal"):
             instance.get_something.with_pagination(lambda r: None).with_retry()
-
-
-def _make_stream_response() -> MagicMock:
-    """Return a MagicMock that looks like a streaming RestResponse."""
-    r = MagicMock(spec=RestResponse)
-    r.is_stream = True
-    r.status_code = 200
-    return r
 
 
 def _make_httpx_response(status_code: int, mocker: MockerFixture, headers: dict[str, str] | None = None) -> Response:

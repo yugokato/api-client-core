@@ -416,7 +416,7 @@ In addition to `__call__`, every endpoint function also provides the following e
 |-----------------------------------------------------------------------------------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `with_retry(condition, *, num_retries=1, retry_after=5, safe_methods_only=False)` | `Self`     | Retries when `condition` is met. `condition` defaults to retrying any non-OK response, and also accepts status code(s), exception class(es), or a callable. `retry_after`: seconds, a callable, or a `BackoffStrategy` for exponential backoff. |
 | `with_lock(lock_name=None)`                                                       | `Self`     | Executes the call under a distributed lock.                                                                                                                                                                                                     |
-| `with_expected_status(*status_codes)`                                             | `Self`     | Asserts that the response status is one of the given codes.                                                                                                                                                                                     |
+| `with_expected_status(*status_codes)`                                             | `Self`     | Asserts that the response status is one of the given codes. With `raise_on_error=True`, the given codes are exempt from the automatic raise.                                                                                                    |
 | `with_max_response_time(threshold_msecs)`                                         | `Self`     | Asserts that the response time does not exceed the threshold.                                                                                                                                                                                  |
 | `with_polling(until, *, interval=5, timeout=60)`                                  | `Self`     | Polls until `until(response)` is `True`, raises `TimeoutError` otherwise.                                                                                                                                                                       |
 | `with_stats()`                                                                    | `Self`     | Prints a scoped stats report after the call. See [API Statistics](#api-statistics-stats).                                                                                                                                                       |
@@ -452,6 +452,12 @@ r = client.Auth.login.with_lock().with_retry(condition=429).with_expected_status
 >         assert r.status_code == 200
 > ```
 
+> [!NOTE]
+> Wrappers chained before `with_concurrency()`/`with_repeat()` apply per individual call in the group
+> (`with_retry`, `with_expected_status`, `with_max_response_time`, `with_polling`) or around the whole group
+> (`with_lock`, `with_stats`), regardless of their relative chain order. With `raise_on_error=True`,
+> `raise_for_status()` also fires per individual call.
+
 
 ## API Client (`APIClient`)
 
@@ -480,7 +486,7 @@ class APIClient:
 | `base_url`       | Base URL prepended to every endpoint path. Mutually exclusive with `rest_client`.                                                                                    |
 | `rest_client`    | Pre-configured `RestClient` or `AsyncRestClient` to inject. Use this when you need full control over transport-level settings (TLS, proxies, session cookies, etc.). |
 | `async_mode`     | Set to `True` to enable async mode. All endpoint calls must then be awaited.                                                                                         |
-| `raise_on_error` | Set to `True` to raise an exception on any non-2xx response.                                                                                                         |
+| `raise_on_error` | Set to `True` to raise an exception on any non-2xx response. Status codes declared via `with_expected_status()` are exempt.                                          |
 | `**kwargs`       | Additional keyword arguments forwarded to the underlying REST client constructor (e.g., `retry_policy`, `headers`, `timeout`, `verify`).                              |
 
 

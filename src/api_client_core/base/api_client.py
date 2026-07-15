@@ -32,7 +32,8 @@ class APIClient:
         :param rest_client: Pre-configured REST client (mutually exclusive with base_url)
         :param async_mode: Enable async mode
         :param raise_on_error: When `True`, automatically calls `raise_for_status()` on every non-2xx response,
-                               raising `httpx.HTTPStatusError`.
+                               raising `httpx.HTTPStatusError`. Status codes explicitly declared via
+                               `with_expected_status()` are exempt from the raise.
         :param kwargs: Additional keyword arguments passed to the REST client constructor
         """
         if not async_mode:
