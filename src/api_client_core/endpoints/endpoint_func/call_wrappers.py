@@ -8,6 +8,7 @@ from copy import copy
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Generic, Literal, ParamSpec, Self, cast, overload
 
+from common_libs.clients.rest_client.rate_limit import RateLimit, RateLimiter
 from common_libs.clients.rest_client.retry import BackoffStrategy, retry_on
 from common_libs.job_executor import Job, run_concurrent
 from common_libs.lock import AsyncLock, Lock
@@ -52,8 +53,8 @@ class CallWrapperMixin(Generic[P]):
         """Initialize the wrapper-composition state used by `_build_call` to compose `with_xxx()` wrappers
         in left-to-right (first=outermost) order."""
         self._call_wrappers: tuple[tuple[_CallWrapper, _WrapperScope], ...] = ()
-        self._multi_call_wrapper: _CallWrapper | None = None  # with_concurrency() / with_repeat()
-        self._outermost_wrapper: _CallWrapper | None = None  # with_pagination()
+        self._multi_call_wrapper: _CallWrapper | None = None
+        self._outermost_wrapper: _CallWrapper | None = None
         self._base_call: Callable[..., Any] | None = None
         self._terminal_wrapper: str | None = None
         # Status codes declared via with_expected_status(), exempt from the client's raise_on_error
@@ -100,6 +101,58 @@ class CallWrapperMixin(Generic[P]):
             return wrapper
 
         return self._with_wrapper(chain_wrapper=(call_with_retry, "call"))
+
+    @requires_instance
+    def with_rate_limit(
+        self, max_requests: int | None = None, *, interval: float = 1.0, limiter: RateLimiter | None = None
+    ) -> Self:
+        """Return a configured, chainable endpoint func that throttles calls with a client-side rate limit.
+
+        By default, a token-bucket limiter is created once at chain time and shared by every call made through the
+        returned endpoint func: it bursts up to `max_requests`, then admits at an average rate of
+        `max_requests / interval` per second. Calls that would exceed the budget wait until a token is available.
+        Pass a pre-built `limiter` (`from api_client_core.types import RateLimiter`) instead of
+        `max_requests`/`interval` to share one budget across multiple endpoints or chains.
+
+        Call the returned callable with the endpoint's own parameters, or chain with other with_xxx() wrappers before
+        the final call. When chained before `with_concurrency()`/`with_repeat()`, each individual call in the group
+        consumes a token. Chain `with_retry()` first to make each retry attempt consume a token, otherwise the whole
+        retry sequence consumes one. This bucket is independent of any client-level `rate_limit`. When both are
+        configured, each call must pass both budgets. To rate-limit all requests made through the client instead,
+        pass `rate_limit=RateLimit(...)` to the client init.
+
+        :param max_requests: Maximum number of calls allowed within `interval` seconds (also the burst size).
+                             Mutually exclusive with `limiter`.
+        :param interval: Length of the time window in seconds. Mutually exclusive with `limiter`.
+        :param limiter: A pre-built `RateLimiter` to reuse instead of creating a new one, for sharing one budget
+                        across multiple endpoints/chains. Mutually exclusive with `max_requests`/`interval`.
+        """
+        if limiter is not None:
+            if max_requests is not None or interval != 1.0:
+                raise ValueError("Provide either `max_requests`/`interval` or `limiter`, not both")
+            rate_limiter = limiter
+        elif max_requests is not None:
+            rate_limiter = RateLimiter(RateLimit(max_requests, interval=interval))
+        else:
+            raise ValueError("Either `max_requests` or `limiter` must be provided")
+
+        def call_with_rate_limit(f: Callable[..., Any]) -> Callable[..., Any]:
+            if self.api_client.async_mode:
+
+                @wraps(f)
+                async def wrapper(*args: Any, **kwargs: Any) -> RestResponse:
+                    await rate_limiter.aacquire()
+                    return await f(*args, **kwargs)
+            else:
+
+                @wraps(f)
+                def wrapper(*args: Any, **kwargs: Any) -> RestResponse:
+                    rate_limiter.acquire()
+                    return f(*args, **kwargs)
+
+            return wrapper
+
+        return self._with_wrapper(chain_wrapper=(call_with_rate_limit, "call"))
 
     @requires_instance
     def with_lock(self, lock_name: str | None = None) -> Self:
@@ -516,11 +569,10 @@ class SyncCallWrapperMixin(CallWrapperMixin[P]):
 
         Call the returned callable with the endpoint's own parameters.
 
-        Wrappers chained before this one apply per individual call in the group (`with_retry`,
-        `with_expected_status`, `with_max_response_time`, `with_polling`) or around the whole group
-        (`with_lock`, `with_stats`), regardless of their relative chain order. With `raise_on_error=True`,
-        `raise_for_status()` also applies per call: the first failure propagates `HTTPStatusError`, or the
-        exceptions are collected in the returned list when `return_exceptions=True`.
+        Each wrapper chained before this one applies either per individual call in the group or around the whole
+        group, depending on that wrapper's own scope (see its docstring), regardless of their relative chain order.
+        With `raise_on_error=True`, `raise_for_status()` also applies per call: the first failure propagates
+        `HTTPStatusError`, or the exceptions are collected in the returned list when `return_exceptions=True`.
 
         NOTE: This is terminal and must always be the last wrapper in a chain.
 
@@ -564,11 +616,10 @@ class SyncCallWrapperMixin(CallWrapperMixin[P]):
         When return_exceptions=True, exceptions are collected in the returned list instead of being propagated —
         so all num calls run even when some fail (KeyboardInterrupt/SystemExit still propagate).
 
-        Wrappers chained before this one apply per individual call in the group (`with_retry`,
-        `with_expected_status`, `with_max_response_time`, `with_polling`) or around the whole group
-        (`with_lock`, `with_stats`), regardless of their relative chain order. With `raise_on_error=True`,
-        `raise_for_status()` also applies per call: the first failure propagates `HTTPStatusError`, or the
-        exceptions are collected in the returned list when `return_exceptions=True`.
+        Each wrapper chained before this one applies either per individual call in the group or around the whole
+        group, depending on that wrapper's own scope (see its docstring), regardless of their relative chain order.
+        With `raise_on_error=True`, `raise_for_status()` also applies per call: the first failure propagates
+        `HTTPStatusError`, or the exceptions are collected in the returned list when `return_exceptions=True`.
 
         NOTE: This is terminal and must always be the last wrapper in a chain.
 
@@ -618,11 +669,10 @@ class AsyncCallWrapperMixin(CallWrapperMixin[P]):
 
         Call the returned callable with the endpoint's own parameters.
 
-        Wrappers chained before this one apply per individual call in the group (`with_retry`,
-        `with_expected_status`, `with_max_response_time`, `with_polling`) or around the whole group
-        (`with_lock`, `with_stats`), regardless of their relative chain order. With `raise_on_error=True`,
-        `raise_for_status()` also applies per call: the first failure propagates `HTTPStatusError`, or the
-        exceptions are collected in the returned list when `return_exceptions=True`.
+        Each wrapper chained before this one applies either per individual call in the group or around the whole
+        group, depending on that wrapper's own scope (see its docstring), regardless of their relative chain order.
+        With `raise_on_error=True`, `raise_for_status()` also applies per call: the first failure propagates
+        `HTTPStatusError`, or the exceptions are collected in the returned list when `return_exceptions=True`.
 
         NOTE: This is terminal and must always be the last wrapper in a chain.
 
@@ -686,11 +736,10 @@ class AsyncCallWrapperMixin(CallWrapperMixin[P]):
         When return_exceptions=True, exceptions are collected in the returned list instead of being propagated —
         so all num calls run even when some fail (KeyboardInterrupt/SystemExit/CancelledError still propagate).
 
-        Wrappers chained before this one apply per individual call in the group (`with_retry`,
-        `with_expected_status`, `with_max_response_time`, `with_polling`) or around the whole group
-        (`with_lock`, `with_stats`), regardless of their relative chain order. With `raise_on_error=True`,
-        `raise_for_status()` also applies per call: the first failure propagates `HTTPStatusError`, or the
-        exceptions are collected in the returned list when `return_exceptions=True`.
+        Each wrapper chained before this one applies either per individual call in the group or around the whole
+        group, depending on that wrapper's own scope (see its docstring), regardless of their relative chain order.
+        With `raise_on_error=True`, `raise_for_status()` also applies per call: the first failure propagates
+        `HTTPStatusError`, or the exceptions are collected in the returned list when `return_exceptions=True`.
 
         NOTE: This is terminal and must always be the last wrapper in a chain.
 

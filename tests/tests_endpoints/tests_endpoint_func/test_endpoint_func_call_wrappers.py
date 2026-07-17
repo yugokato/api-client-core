@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from common_libs.clients.rest_client import RestResponse
+from common_libs.clients.rest_client.rate_limit import RateLimit, RateLimiter
 from common_libs.clients.rest_client.retry import retry_on
 from common_libs.clients.rest_client.types import Request, Response
 from common_libs.clients.rest_client.utils import set_request_to_exception
@@ -813,6 +814,166 @@ class TestEndpointFuncCallWithPolling:
             )()
 
 
+class TestEndpointFuncCallWithRateLimit:
+    """Tests for EndpointFunc.with_rate_limit()"""
+
+    def test_sync_acquires_token_before_request(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that a token is acquired from the rate limiter before the request is made"""
+        call_order: list[str] = []
+
+        mock_request = mocker.patch.object(Client, "request")
+
+        def _request_side_effect(*a: Any, **kw: Any) -> Response:
+            call_order.append("request")
+            return _make_httpx_response(200, mocker)
+
+        mock_request.side_effect = _request_side_effect
+
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+        mock_limiter_cls.return_value.acquire.side_effect = lambda: call_order.append("acquire")
+
+        instance = api_class(api_client)
+        instance.get_something.with_rate_limit(2, interval=1.0)()
+
+        mock_limiter_cls.assert_called_once_with(RateLimit(2, interval=1.0))
+        assert call_order == ["acquire", "request"]
+
+    async def test_async_acquires_token_before_request(
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
+    ) -> None:
+        """Test that in async mode a token is asynchronously acquired before the request is made"""
+        call_order: list[str] = []
+
+        mock_request = mocker.patch.object(AsyncClient, "request")
+
+        def _request_side_effect(*a: Any, **kw: Any) -> Response:
+            call_order.append("request")
+            return _make_httpx_response(200, mocker)
+
+        mock_request.side_effect = _request_side_effect
+
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+        mock_limiter_cls.return_value.aacquire = mocker.AsyncMock(side_effect=lambda: call_order.append("acquire"))
+
+        instance = api_class_async(api_client_async)
+        await instance.get_something.with_rate_limit(2, interval=1.0)()
+
+        mock_limiter_cls.assert_called_once_with(RateLimit(2, interval=1.0))
+        assert call_order == ["acquire", "request"]
+
+    def test_limiter_created_once_and_shared_across_calls(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that the rate limiter is created once at chain time and shared across calls of the configured func"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+
+        instance = api_class(api_client)
+        func = instance.get_something.with_rate_limit(2)
+        func()
+        func()
+
+        mock_limiter_cls.assert_called_once()
+        assert mock_limiter_cls.return_value.acquire.call_count == 2
+
+    def test_sync_returns_rest_response(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_rate_limit returns a RestResponse"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        instance = api_class(api_client)
+        r = instance.get_something.with_rate_limit(100)()
+        assert isinstance(r, RestResponse)
+
+    async def test_async_returns_rest_response(
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
+    ) -> None:
+        """Test that with_rate_limit returns a RestResponse in async mode"""
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
+        instance = api_class_async(api_client_async)
+        r = await instance.get_something.with_rate_limit(100)()
+        assert isinstance(r, RestResponse)
+
+    def test_rejects_non_positive_max_requests(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
+        """Test that a non-positive max_requests raises ValueError at chain time"""
+        instance = api_class(api_client)
+        with pytest.raises(ValueError, match="max_requests must be a positive integer"):
+            instance.get_something.with_rate_limit(0)
+
+    def test_rejects_non_positive_interval(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
+        """Test that a non-positive interval raises ValueError at chain time"""
+        instance = api_class(api_client)
+        with pytest.raises(ValueError, match="interval must be a positive number"):
+            instance.get_something.with_rate_limit(1, interval=0)
+
+    def test_provided_limiter_is_reused_not_rebuilt(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that passing limiter reuses the given RateLimiter instead of building a new one"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+        provided_limiter = mocker.Mock(spec=RateLimiter)
+
+        instance = api_class(api_client)
+        instance.get_something.with_rate_limit(limiter=provided_limiter)()
+
+        mock_limiter_cls.assert_not_called()
+        provided_limiter.acquire.assert_called_once()
+
+    async def test_async_provided_limiter_is_reused_not_rebuilt(
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
+    ) -> None:
+        """Test that in async mode passing limiter reuses the given RateLimiter instead of building a new one"""
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+        provided_limiter = mocker.Mock(spec=RateLimiter)
+        provided_limiter.aacquire = mocker.AsyncMock()
+
+        instance = api_class_async(api_client_async)
+        await instance.get_something.with_rate_limit(limiter=provided_limiter)()
+
+        mock_limiter_cls.assert_not_called()
+        provided_limiter.aacquire.assert_awaited_once()
+
+    def test_shared_limiter_across_two_endpoints(
+        self, mocker: MockerFixture, api_client: APIClient, api_class_factory: Callable[[APIClient], type[BaseAPI]]
+    ) -> None:
+        """Test that the same limiter instance can be shared across two independent endpoint funcs"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        shared_limiter = mocker.Mock(spec=RateLimiter)
+
+        instance_a = api_class_factory(api_client)(api_client)
+        instance_b = api_class_factory(api_client)(api_client)
+        instance_a.get_something.with_rate_limit(limiter=shared_limiter)()
+        instance_b.get_something.with_rate_limit(limiter=shared_limiter)()
+
+        assert shared_limiter.acquire.call_count == 2
+
+    def test_rejects_both_max_requests_and_limiter(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that providing both max_requests and limiter raises ValueError at chain time"""
+        instance = api_class(api_client)
+        with pytest.raises(ValueError, match=r"Provide either `max_requests`/`interval` or `limiter`, not both"):
+            instance.get_something.with_rate_limit(1, limiter=mocker.Mock(spec=RateLimiter))
+
+    def test_rejects_interval_with_limiter(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that providing both interval and limiter raises ValueError at chain time"""
+        instance = api_class(api_client)
+        with pytest.raises(ValueError, match=r"Provide either `max_requests`/`interval` or `limiter`, not both"):
+            instance.get_something.with_rate_limit(interval=2.0, limiter=mocker.Mock(spec=RateLimiter))
+
+    def test_rejects_neither_max_requests_nor_limiter(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
+        """Test that providing neither max_requests nor limiter raises ValueError at chain time"""
+        instance = api_class(api_client)
+        with pytest.raises(ValueError, match=r"Either `max_requests` or `limiter` must be provided"):
+            instance.get_something.with_rate_limit()
+
+
 class TestEndpointFuncCallWithChaining:
     """Tests for chaining multiple with_xxx() wrappers"""
 
@@ -1084,6 +1245,96 @@ class TestEndpointFuncCallWithChaining:
 
         assert len(results) == 2
         assert all(isinstance(r, RestResponse) and r.status_code == 404 for r in results)
+
+    def test_sync_with_retry_then_with_rate_limit_acquires_token_per_attempt(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_retry().with_rate_limit() acquires a token for each retry attempt.
+
+        Because with_retry() is the outer wrapper (first in chain), every attempt passes through the
+        rate limiter and consumes a token.
+        """
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
+        )
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+
+        instance = api_class(api_client)
+        r = instance.get_something.with_retry(condition=503, num_retries=1, retry_after=0).with_rate_limit(1)()
+
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 200
+        # A token is acquired once per attempt: initial try + 1 retry = 2 total
+        assert mock_limiter_cls.return_value.acquire.call_count == 2
+
+    def test_sync_with_rate_limit_then_with_retry_acquires_one_token_for_all_attempts(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_rate_limit().with_retry() acquires a single token for the whole retry sequence.
+
+        Because with_rate_limit() is the outer wrapper (first in chain), it wraps the entire retry
+        sequence and consumes just one token.
+        """
+        mocker.patch.object(
+            Client,
+            "request",
+            side_effect=[_make_httpx_response(503, mocker), _make_httpx_response(200, mocker)],
+        )
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+
+        instance = api_class(api_client)
+        r = instance.get_something.with_rate_limit(1).with_retry(condition=503, num_retries=1, retry_after=0)()
+
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 200
+        assert mock_limiter_cls.return_value.acquire.call_count == 1
+
+    def test_sync_with_rate_limit_then_with_repeat_acquires_token_per_call(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_rate_limit().with_repeat() consumes a token from a single shared limiter for each call"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+
+        instance = api_class(api_client)
+        results = instance.get_something.with_rate_limit(1).with_repeat(num=3)()
+
+        assert len(results) == 3
+        mock_limiter_cls.assert_called_once()
+        assert mock_limiter_cls.return_value.acquire.call_count == 3
+
+    def test_sync_with_rate_limit_then_with_concurrency_acquires_token_per_call(
+        self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
+    ) -> None:
+        """Test that with_rate_limit().with_concurrency() consumes a token from a single shared limiter for
+        each concurrent call"""
+        mocker.patch.object(Client, "request", return_value=_make_httpx_response(200, mocker))
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+
+        instance = api_class(api_client)
+        results = instance.get_something.with_rate_limit(1).with_concurrency(num=3)()
+
+        assert len(results) == 3
+        mock_limiter_cls.assert_called_once()
+        assert mock_limiter_cls.return_value.acquire.call_count == 3
+
+    async def test_async_with_rate_limit_then_with_repeat_acquires_token_per_call(
+        self, mocker: MockerFixture, api_client_async: APIClient, api_class_async: type[BaseAPI]
+    ) -> None:
+        """Test that async with_rate_limit().with_repeat() consumes a token from a single shared limiter for
+        each call"""
+        mocker.patch.object(AsyncClient, "request", return_value=_make_httpx_response(200, mocker))
+        mock_limiter_cls = mocker.patch(f"{_call_wrappers_module.__name__}.{RateLimiter.__name__}")
+        mock_limiter_cls.return_value.aacquire = mocker.AsyncMock()
+
+        instance = api_class_async(api_client_async)
+        results = await instance.get_something.with_rate_limit(1).with_repeat(num=3)()
+
+        assert len(results) == 3
+        mock_limiter_cls.assert_called_once()
+        assert mock_limiter_cls.return_value.aacquire.await_count == 3
 
     def test_sync_terminal_wrapper_in_the_middle_raises(self, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that chaining any wrapper after a terminal one raises RuntimeError at chain-build time."""

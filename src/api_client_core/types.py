@@ -5,6 +5,8 @@ from dataclasses import MISSING, Field, asdict, astuple, dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, TypedDict
 
 from common_libs.clients.rest_client import RestResponse
+from common_libs.clients.rest_client.rate_limit import RateLimit, RateLimiter
+from common_libs.clients.rest_client.retry import RetryPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator
@@ -65,7 +67,7 @@ else:
     Protocol = object
 
 
-__all__ = ["Alias", "File", "Kwargs", "Query", "RestResponse", "Unset"]
+__all__ = ["Alias", "File", "Kwargs", "Query", "RateLimit", "RateLimiter", "RestResponse", "RetryPolicy", "Unset"]
 
 
 class _UnsetType:
