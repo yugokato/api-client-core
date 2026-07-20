@@ -1,4 +1,4 @@
-"""Unit tests for api_client_core's logging setup (`__init__.py`)."""
+"""Unit tests for api_client_core's logging setup (`logging.py`)."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class TestDefaultLoggingState:
             pre_existing_logger = logging.getLogger("subprocess_pre_existing_logger")
             assert pre_existing_logger.disabled is False
 
-            import api_client_core  # noqa: E402
+            import api_client_core
 
             assert pre_existing_logger.disabled is False, "importing api_client_core disabled a pre-existing logger"
             api_client_core_logger = logging.getLogger("api_client_core")
@@ -63,18 +63,11 @@ class TestDefaultLoggingState:
 class TestSetupLogging:
     """Tests for `api_client_core.setup_logging()`"""
 
-    def test_default_config_configures_api_client_core_logger(self) -> None:
-        """Test that setup_logging() with no arguments applies the bundled config to the api_client_core logger"""
+    @pytest.mark.parametrize("logger_name", ["api_client_core", "common_libs"])
+    def test_default_config_configures_logger(self, logger_name: str) -> None:
+        """Test that setup_logging() with no arguments applies the bundled config to the given logger"""
         setup_logging()
-        logger = logging.getLogger("api_client_core")
-        assert logger.level == logging.INFO
-        assert logger.propagate is False
-        assert any(isinstance(handler, ColoredStreamHandler) for handler in logger.handlers)
-
-    def test_default_config_configures_common_libs_logger(self) -> None:
-        """Test that setup_logging() with no arguments also applies the bundled config to the common_libs logger"""
-        setup_logging()
-        logger = logging.getLogger("common_libs")
+        logger = logging.getLogger(logger_name)
         assert logger.level == logging.INFO
         assert logger.propagate is False
         assert any(isinstance(handler, ColoredStreamHandler) for handler in logger.handlers)
@@ -190,12 +183,101 @@ class TestSetupLogging:
         assert logger.level == logging.ERROR
         assert logger.propagate is True
 
-    def test_invalid_config_type_raises_type_error(self) -> None:
-        """Test that a non-Mapping `config` raises a `TypeError`"""
+    @pytest.mark.parametrize("kwarg", ["config", "delta_config"])
+    def test_invalid_config_type_raises_type_error(self, kwarg: str) -> None:
+        """Test that a non-Mapping `config`/`delta_config` raises a `TypeError`"""
         with pytest.raises(TypeError, match="must be a Mapping"):
-            setup_logging(config=42)
+            setup_logging(**{kwarg: 42})
 
-    def test_invalid_delta_config_type_raises_type_error(self) -> None:
-        """Test that a non-Mapping `delta_config` raises a `TypeError`"""
-        with pytest.raises(TypeError, match="must be a Mapping"):
-            setup_logging(delta_config=42)
+    @pytest.mark.parametrize(
+        "level, expected",
+        [
+            pytest.param("DEBUG", logging.DEBUG, id="name"),
+            pytest.param(logging.DEBUG, logging.DEBUG, id="standard_int"),
+            pytest.param(15, 15, id="custom_int"),
+        ],
+    )
+    def test_level_accepts_valid_values(self, level: int | str, expected: int) -> None:
+        """Test that `level` accepts a level name, a standard numeric level, or a custom numeric level"""
+        setup_logging(level=level)
+
+        assert logging.getLogger("api_client_core").level == expected
+
+    def test_level_is_mirrored_to_common_libs(self) -> None:
+        """Test that `level` is reflected in the mirrored `common_libs` logger"""
+        setup_logging(level="DEBUG")
+
+        assert logging.getLogger("common_libs").level == logging.DEBUG
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param(
+                {
+                    "config": {
+                        "version": 1,
+                        "disable_existing_loggers": False,
+                        "loggers": {"api_client_core": {"level": "WARNING"}},
+                    }
+                },
+                id="config",
+            ),
+            pytest.param({"delta_config": {"loggers": {"api_client_core": {"level": "ERROR"}}}}, id="delta_config"),
+        ],
+    )
+    def test_level_takes_precedence(self, kwargs: dict[str, Any]) -> None:
+        """Test that `level` overrides a level set via `config` or `delta_config`"""
+        setup_logging(**kwargs, level="DEBUG")
+
+        assert logging.getLogger("api_client_core").level == logging.DEBUG
+
+    def test_level_does_not_override_explicit_common_libs_logger(self) -> None:
+        """Test that `level` only changes `api_client_core`, leaving an explicit `common_libs` entry alone"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {
+                "api_client_core": {"level": "WARNING"},
+                "common_libs": {"level": "ERROR"},
+            },
+        }
+
+        setup_logging(config, level="DEBUG")
+
+        assert logging.getLogger("api_client_core").level == logging.DEBUG
+        assert logging.getLogger("common_libs").level == logging.ERROR
+
+    def test_level_creates_api_client_core_logger_when_missing(self) -> None:
+        """Test that `level` adds an `api_client_core` logger entry when the resolved config has none"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {"some_other_logger": {"level": "WARNING"}},
+        }
+
+        setup_logging(config, level="DEBUG")
+
+        assert logging.getLogger("api_client_core").level == logging.DEBUG
+
+    def test_level_raises_type_error_for_non_mapping_api_client_core_logger(self) -> None:
+        """Test that `level` raises a `TypeError` when the config's `api_client_core` logger isn't a Mapping"""
+        config: dict[str, Any] = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "loggers": {"api_client_core": None},
+        }
+
+        with pytest.raises(TypeError, match="api_client_core logger config must be a Mapping, not NoneType"):
+            setup_logging(config, level="DEBUG")
+
+    @pytest.mark.parametrize("level", ["foo", "warning"], ids=["invalid_name", "lowercase_name"])
+    def test_invalid_level_name_raises(self, level: str) -> None:
+        """Test that a `level` name that is invalid or not uppercase raises a `ValueError`"""
+        with pytest.raises(ValueError, match=f"Invalid `level`: '{level}'"):
+            setup_logging(level=level)
+
+    @pytest.mark.parametrize("level", [20.0, True, False], ids=["float", "true", "false"])
+    def test_invalid_level_type_raises_type_error(self, level: Any) -> None:
+        """Test that a `level` that is neither an int nor a str raises a `TypeError`"""
+        with pytest.raises(TypeError, match=f"`level` must be an int or str, not {type(level).__name__}"):
+            setup_logging(level=level)
