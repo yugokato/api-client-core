@@ -32,7 +32,7 @@ The framework uses the `httpx`-based REST client from [common-libs](https://gith
 
 # Design Goals
 
-- **Decorator-based endpoint definition** — decorate a plain method with `@endpoint.<method>("/path")` and the framework handles the rest.
+- **Decorator-based endpoint definition** — decorate a plain method with `@endpoint` and the framework handles the rest.
 - **Sync/async dual-mode** from the same source code — one endpoint definition works with both `sync` and `async` clients.
 - **Batteries-included** for common needs: automatic retries, distributed locking, concurrent execution, streaming responses, and API call statistics.
 - **Extensible** via request/response hooks and decorators.
@@ -50,7 +50,7 @@ pip install git+https://github.com/yugokato/api-client-core
 
 # Quick Start
 
-Define an API endpoint by decorating a class method with `@endpoint.<method>("/path")`:
+Define an API endpoint by decorating a class method with `@endpoint.<method>(<path>)`:
 
 ```python
 from api_client_core import BaseAPI, endpoint
@@ -106,7 +106,7 @@ The example uses a fictional "my-app" API service at `https://api.example.com`.
 
 ### 1. Define each API class and its endpoints
 
-Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `BaseAPI`, and add methods using the `@endpoint.<method>("/path")` endpoint factory decorator. The framework automatically maps function parameters to path parameters, query parameters, or the request body based on the endpoint definition.
+Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `BaseAPI`, and add methods using the `@endpoint.<method>(<path>)` endpoint factory decorator. The framework automatically maps function parameters to path parameters, query parameters, or the request body based on the endpoint definition.
 
 <details open>
 <summary><code>auth.py</code></summary>
@@ -284,6 +284,9 @@ def get_user(self, user_id: int) -> RestResponse:
 
 All HTTP-method decorators also accept `**default_raw_options`, forwarded to the underlying HTTP library (`httpx`) for every call to that endpoint (e.g., `timeout=30`).
 
+> [!NOTE]
+> `@endpoint(<method>, <path>)` syntax is also supported.
+
 ### Metadata decorators
 
 | Decorator                       | Applies to           | Description                                                               |
@@ -296,7 +299,7 @@ All HTTP-method decorators also accept `**default_raw_options`, forwarded to the
 
 ### Stacking decorators
 
-`@endpoint.<method>("/path")` can appear anywhere in the decorator stack. The framework resolves them in the right order at class definition time:
+`@endpoint.<method>(<path>)` can appear anywhere in the decorator stack. The framework resolves them in the right order at class definition time:
 
 ```python
 @my_decorator   # Your custom decorator — must be registered with @endpoint.decorator
@@ -309,7 +312,7 @@ def list_items(self, *, page: int = Unset, page_size: int = Unset, **kwargs: Unp
 
 ## Endpoint Functions (`EndpointFunc`)
 
-`EndpointFunc` is the heart of the framework. When you decorate a method with the `@endpoint.<method>("/path")` endpoint factory decorator, two things happen:
+`EndpointFunc` is the heart of the framework. When you decorate a method with the `@endpoint` decorator, two things happen:
 
 1. **At class definition time** — the decorator replaces the method on the class with an `EndpointHandler` descriptor.
 2. **At runtime access** — the `EndpointHandler` descriptor returns a dynamically created (and cached) `EndpointFunc` instance, making the method a fully managed endpoint function.
@@ -1020,7 +1023,7 @@ def warn_if_slow(threshold_ms: float) -> Callable[[Callable[P, R]], Callable[P, 
 ```
 
 > [!TIP]
-> Custom decorators can appear at any position relative to `@endpoint.<method>("/path")` — above or below it. The framework resolves the stack correctly either way.
+> Custom decorators can appear at any position relative to `@endpoint.<method>(<path>)` — above or below it. The framework resolves the stack correctly either way.
 
 ## Override `request_wrapper` for class-level cross-cutting behavior
 

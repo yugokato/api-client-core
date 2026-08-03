@@ -3,8 +3,9 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Coroutine
 from functools import partial, wraps
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeAlias, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, Self, TypeAlias, TypeVar, cast, overload
 
+from ..constants import VALID_METHODS
 from ..types import RestResponse
 from .endpoint_handler import DeferredOperation, EndpointHandler, PendingHandler, PendingOperations
 
@@ -67,6 +68,12 @@ class endpoint:
         'https://api.my-app.com/v1/auth/login'
 
     """  # noqa: E501
+
+    def __new__(cls: Self, method: str, path: str, **kwargs: Any) -> Callable[[_OrigFunc[T, P, R]], EndpointHandler[P]]:
+        """An alternative form of `@endpoint.<method>(<path>)`"""
+        if not isinstance(method, str) or method.lower() not in VALID_METHODS:
+            raise ValueError(f"Unsupported HTTP method: {method}. Must be one of {VALID_METHODS}")
+        return cls._create(method.lower(), path, **kwargs)
 
     @staticmethod
     def get(path: str, **default_raw_options: Any) -> Callable[[_OrigFunc[T, P, R]], EndpointHandler[P]]:
