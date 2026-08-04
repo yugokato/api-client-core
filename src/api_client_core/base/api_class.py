@@ -90,7 +90,7 @@ class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
 
     def pre_request_hook(
         self, endpoint: Endpoint[Any], *path_params: Any, **params: Any
-    ) -> None | Coroutine[Any, Any, None]:
+    ) -> Coroutine[Any, Any, None] | None:
         """Hook function called before each request
 
         May be defined with `async def` instead of `def`. An async hook is awaited on an async client, but raises
@@ -109,7 +109,7 @@ class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
         exception: HTTPError | None,
         *path_params: Any,
         **params: Any,
-    ) -> None | Coroutine[Any, Any, None]:
+    ) -> Coroutine[Any, Any, None] | None:
         """Hook function called after each request
 
         May be defined with `async def` instead of `def`. An async hook is awaited on an async client, but raises
