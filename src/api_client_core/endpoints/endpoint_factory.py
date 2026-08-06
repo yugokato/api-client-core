@@ -69,7 +69,9 @@ class endpoint:
 
     """  # noqa: E501
 
-    def __new__(cls: Self, method: str, path: str, **kwargs: Any) -> Callable[[_OrigFunc[T, P, R]], EndpointHandler[P]]:
+    def __new__(
+        cls: type[Self], method: str, path: str, **kwargs: Any
+    ) -> Callable[[_OrigFunc[T, P, R]], EndpointHandler[P]]:
         """An alternative form of `@endpoint.<method>(<path>)`"""
         if not isinstance(method, str) or method.lower() not in VALID_METHODS:
             raise ValueError(f"Unsupported HTTP method: {method}. Must be one of {VALID_METHODS}")
