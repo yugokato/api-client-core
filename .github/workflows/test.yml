@@ -51,7 +51,7 @@ jobs:
 
   test:
     needs: [changes]
-    if: ${{ needs.changes.outputs.has-changes == 'true' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.has-changes == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
