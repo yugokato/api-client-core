@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 from common_libs.clients.rest_client import AsyncRestClient, RestClient
-from httpx import AsyncClient, Client
+from httpx2 import AsyncClient, Client
 from pytest_mock import MockerFixture
 
 from api_client_core.base.api_client import APIClient

@@ -171,10 +171,10 @@ def get_reserved_param_names() -> list[str]:
     return list(get_type_hints(Kwargs))
 
 
-def is_httpx_passthrough_field(name: str, param_type: Any) -> bool:
-    """Check if a parameter field should be passed through to httpx unchanged (no aliasing).
+def is_httpx2_passthrough_field(name: str, param_type: Any) -> bool:
+    """Check if a parameter field should be passed through to httpx2 unchanged (no aliasing).
 
-    `json`, `data`, and `files` map directly to httpx request kwargs. They must not be
+    `json`, `data`, and `files` map directly to httpx2 request kwargs. They must not be
     renamed so the HTTP layer can route them to the correct request slot.
 
     :param name: Parameter name
@@ -195,7 +195,7 @@ def alias_illegal_model_field_names(location: str, model_fields: list[DataclassM
     """
 
     def make_alias(name: str, param_type: Any) -> str:
-        if is_httpx_passthrough_field(name, param_type):
+        if is_httpx2_passthrough_field(name, param_type):
             return name
         return clean_model_field_name(name)
 

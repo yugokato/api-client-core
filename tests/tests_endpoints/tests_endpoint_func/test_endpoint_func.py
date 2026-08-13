@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from common_libs.clients.rest_client import RestResponse
-from httpx import Client
+from httpx2 import Client
 from pytest_mock import MockerFixture
 
 import api_client_core.endpoints.utils.endpoint_call as endpoint_call_util
@@ -456,7 +456,7 @@ class TestQueryMarkerRouting:
     def _make_request_and_capture(
         self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]
     ) -> dict[str, Any]:
-        """Helper: call the single endpoint on api_class with mode='test' and return httpx call kwargs."""
+        """Helper: call the single endpoint on api_class with mode='test' and return httpx2 call kwargs."""
         mock_request = mocker.patch.object(Client, "request")
         instance = api_class(api_client)
         instance.update_item(item_id=1, mode="test")
