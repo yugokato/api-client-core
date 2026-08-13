@@ -14,7 +14,7 @@ from common_libs.clients.rest_client.types import Request, Response
 from common_libs.clients.rest_client.utils import set_request_to_exception
 from common_libs.lock import AsyncLock, Lock
 from filelock import Timeout as FileLockTimeout
-from httpx import AsyncClient, Client, HTTPStatusError
+from httpx2 import AsyncClient, Client, HTTPStatusError
 from pytest_mock import MockerFixture
 
 import api_client_core.endpoints.endpoint_func.call_wrappers as _call_wrappers_module
@@ -2349,7 +2349,7 @@ class TestEndpointFuncCallWithPagination:
 
 
 def _make_httpx_response(status_code: int, mocker: MockerFixture, headers: dict[str, str] | None = None) -> Response:
-    """Build a minimal mock httpx response with the given status code and optional headers."""
+    """Build a minimal mock httpx2 response with the given status code and optional headers."""
     r = mocker.MagicMock(spec=Response)
     r.status_code = status_code
     r.is_success = status_code < 300

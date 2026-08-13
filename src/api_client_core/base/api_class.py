@@ -10,7 +10,7 @@ from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from common_libs.logging import get_logger
-from httpx import HTTPError
+from httpx2 import HTTPError
 
 from ..endpoints import Endpoint
 from ..endpoints.endpoint_func import AsyncEndpointFunc, SyncEndpointFunc
@@ -117,7 +117,7 @@ class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
 
         :param endpoint: Endpoint object associated with an endpoint function called
         :param response: Response of the API request
-        :param exception: An exception raised in the httpx client
+        :param exception: An exception raised in the httpx2 client
         :param path_params: API path parameters for the request
         :param params: API parameters sent with the request
         """

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 from common_libs.clients.rest_client import AsyncRestClient, RestClient
 from common_libs.logging import get_logger
 from common_libs.naming import to_class_name
-from httpx import HTTPError
+from httpx2 import HTTPError
 
 from ...types import EndpointModel, RestResponse, _QualNameReprMeta
 from ..executors import AsyncExecutor, SyncExecutor

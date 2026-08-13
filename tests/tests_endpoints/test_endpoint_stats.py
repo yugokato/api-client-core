@@ -17,7 +17,7 @@ import pytest
 from common_libs.ansi_colors import ColorCodes
 from common_libs.clients.rest_client import RestResponse
 from common_libs.clients.rest_client.types import Request, Response
-from httpx import AsyncClient, Client, ConnectError
+from httpx2 import AsyncClient, Client, ConnectError
 from pytest_mock import MockerFixture
 
 from api_client_core.base import APIClient, BaseAPI

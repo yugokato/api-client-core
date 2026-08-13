@@ -651,7 +651,7 @@ class TestGenerateRestFuncParams:
     def test_string_raw_data_with_endpoint_content_type_injects_header(self) -> None:
         """Test that a raw-string `data` raw-option triggers Content-Type header injection"""
         endpoint = _make_endpoint({}, content_type="text/plain")
-        # Pass `data` as a raw httpx option (not an endpoint param) so it lands as a string
+        # Pass `data` as a raw httpx2 option (not an endpoint param) so it lands as a string
         result = endpoint_call_util.generate_rest_func_params(endpoint, {}, {}, data="raw text body")
         assert result["data"] == "raw text body"
         assert result.get("headers", {}).get("Content-Type") == "text/plain"

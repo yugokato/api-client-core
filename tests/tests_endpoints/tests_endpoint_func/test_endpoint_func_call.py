@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from common_libs.clients.rest_client import RestResponse
 from common_libs.clients.rest_client.types import Request, Response
-from httpx import AsyncClient, Client, ConnectError, HTTPError, HTTPStatusError
+from httpx2 import AsyncClient, Client, ConnectError, HTTPError, HTTPStatusError
 from pytest_mock import MockerFixture
 
 import api_client_core.endpoints.endpoint_func.endpoint_func as _endpoint_func_module
@@ -1471,7 +1471,7 @@ def _make_stream_response() -> MagicMock:
 
 
 def _make_httpx_response(status_code: int, mocker: MockerFixture, headers: dict[str, str] | None = None) -> Response:
-    """Build a minimal mock httpx response with the given status code and optional headers."""
+    """Build a minimal mock httpx2 response with the given status code and optional headers."""
     r = mocker.MagicMock(spec=Response)
     r.status_code = status_code
     r.is_success = status_code < 300

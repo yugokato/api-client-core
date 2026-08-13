@@ -4,7 +4,7 @@ from typing import TypeVar
 import pytest
 from common_libs.clients.rest_client import AsyncRestClient, RestClient, RestResponse
 from common_libs.clients.rest_client.utils import get_supported_request_parameters
-from httpx import AsyncClient, Client
+from httpx2 import AsyncClient, Client
 from pytest import FixtureRequest
 from pytest_mock import MockerFixture
 
@@ -16,7 +16,7 @@ pytest_plugins = ["common_libs.testing.pytest_plugins.common"]
 ClientT = TypeVar("ClientT", bound=APIClient)
 ClassT = TypeVar("ClassT", bound=BaseAPI)
 
-# `get_supported_request_parameters()` is `lru_cache`d against the real `httpx.Client.request` signature.
+# `get_supported_request_parameters()` is `lru_cache`d against the real `httpx2.Client.request` signature.
 # Call it here, at collection time, so the cache is primed before `api_client_factory` below replaces
 # `Client.request` with a mock (which would otherwise poison the cache for the rest of this worker process).
 get_supported_request_parameters()

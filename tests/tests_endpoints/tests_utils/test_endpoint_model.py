@@ -114,7 +114,7 @@ class TestGetReservedParamNames:
 
 
 class TestIsHttpxPassthroughField:
-    """Tests for endpoint_model_util.is_httpx_passthrough_field()"""
+    """Tests for endpoint_model_util.is_httpx2_passthrough_field()"""
 
     @pytest.mark.parametrize(
         ("name", "param_type", "expected"),
@@ -134,9 +134,9 @@ class TestIsHttpxPassthroughField:
             ("attachments", File, False),
         ],
     )
-    def test_is_httpx_passthrough_field(self, name: str, param_type: Any, expected: bool) -> None:
+    def test_is_httpx2_passthrough_field(self, name: str, param_type: Any, expected: bool) -> None:
         """Test that only the (json, list) / (data, str) / (files, File) combinations are pass-through"""
-        assert endpoint_model_util.is_httpx_passthrough_field(name, param_type) is expected
+        assert endpoint_model_util.is_httpx2_passthrough_field(name, param_type) is expected
 
 
 class TestAliasIllegalModelFieldNames:
@@ -156,8 +156,8 @@ class TestAliasIllegalModelFieldNames:
         assert fields[0].name == "my_param"
         assert fields[0].type == Annotated[str, Alias("my-param")]
 
-    def test_httpx_passthrough_field_is_not_aliased(self) -> None:
-        """Test that httpx pass-through field names (json/data/files) are never aliased"""
+    def test_httpx2_passthrough_field_is_not_aliased(self) -> None:
+        """Test that httpx2 pass-through field names (json/data/files) are never aliased"""
         json_field = DataclassModelField("json", list, _body_field())
         data_field = DataclassModelField("data", str, _body_field())
         files_field = DataclassModelField("files", File, _body_field())

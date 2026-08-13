@@ -194,7 +194,7 @@ def generate_rest_func_params(
     :param session_headers: Request client's session headers
     :param quiet: quiet flag passed to an endpoint function call
     :param use_query_string: Force sends parameters as query strings
-    :param raw_options: Raw request options passed to the httpx client
+    :param raw_options: Raw request options passed to the httpx2 client
     """
     json_ = {}
     data = {}
@@ -278,9 +278,9 @@ def generate_rest_func_params(
     if file_data := files.to_dict():
         _merge_request_arg(rest_func_params, "files", file_data)
 
-    # httpx will not automatically set Content-Type when `data` is a string or bytes.
+    # httpx2 will not automatically set Content-Type when `data` is a string or bytes.
     # Fall back to the endpoint's declared Content-Type in that case, unless the header is explicitly
-    # set by the caller. Otherwise httpx handles Content-Type automatically.
+    # set by the caller. Otherwise httpx2 handles Content-Type automatically.
     if (
         (rest_data := rest_func_params.get("data"))
         and isinstance(rest_data, str | bytes)
@@ -313,7 +313,7 @@ def validate_params(endpoint: Endpoint[Any], params: dict[str, Any], raw_options
 
     :param endpoint: Endpoint obj
     :param params: Request parameters
-    :param raw_options: Raw request options passed to the httpx client
+    :param raw_options: Raw request options passed to the httpx2 client
     """
     if endpoint.is_deprecated:
         logger.warning(f"DEPRECATED: '{endpoint}' is deprecated")
@@ -409,5 +409,5 @@ def _get_specified_content_type_header(raw_options: dict[str, Any], session_head
     """Get Content-Type header value set for the request or for the current session"""
     request_headers = raw_options.get("headers", {})
     content_type_header = next((v for k, v in request_headers.items() if k.lower() == "content-type"), None)
-    # session_headers is httpx.Headers, which is already case-insensitive
+    # session_headers is httpx2.Headers, which is already case-insensitive
     return content_type_header or session_headers.get("Content-Type")

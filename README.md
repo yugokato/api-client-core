@@ -7,7 +7,7 @@ API Client Core — A Framework for Building Python API Clients
 
 **API Client Core** is a framework for building Python API clients with decorator-based endpoint definitions. The `@endpoint` decorators turn plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, execution wrappers, retries, and call statistics.
 
-The framework uses the `httpx`-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
+The framework uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
 
 
 # Table of Contents
@@ -181,7 +181,7 @@ class UsersAPI(BaseAPI):
 > [!NOTE]
 >- In most cases, the function body should be empty (`...`, `pass`, etc.). The framework automatically handles the HTTP request using the provided parameters.
 > - Use the `Unset` sentinel (not `None`) as the default when a parameter should be omitted unless explicitly set. See [`Unset` and default values](#unset-and-default-values).
-> - `**kwargs` takes framework-level request control options and raw `httpx` options.
+> - `**kwargs` takes framework-level request control options and raw `httpx2` options.
 
 > [!TIP]
 > - Consider creating an app-level base class instead of subclassing `BaseAPI` directly. See [API Class (`BaseAPI`)](#api-class-baseapi) for details.
@@ -282,7 +282,7 @@ def get_user(self, user_id: int) -> RestResponse:
 - `@endpoint.get(path)` always sends parameters as a query string.
 - All other verbs send parameters as the request body by default. Pass `use_query_string=True` to route every parameter to the query string, or annotate individual params with [`Query`](#query) to target specific ones.
 
-All HTTP-method decorators also accept `**default_raw_options`, forwarded to the underlying HTTP library (`httpx`) for every call to that endpoint (e.g., `timeout=30`).
+All HTTP-method decorators also accept `**default_raw_options`, forwarded to the underlying HTTP library (`httpx2`) for every call to that endpoint (e.g., `timeout=30`).
 
 > [!NOTE]
 > `@endpoint(<method>, <path>)` syntax is also supported.
@@ -343,7 +343,7 @@ r = client.Auth.login(username="foo", password="bar")
 r = await client.Auth.login(username="foo", password="bar")
 ```
 
-Beyond the endpoint's own parameters, the function also accepts framework-level control options and `httpx` raw options as `**kwargs`. See [`Kwargs`](#kwargs-and-unpack).
+Beyond the endpoint's own parameters, the function also accepts framework-level control options and `httpx2` raw options as `**kwargs`. See [`Kwargs`](#kwargs-and-unpack).
 
 ### Function parameter signatures
 
@@ -598,7 +598,7 @@ When both decorators and hooks are configured, the full request lifecycle runs i
 from collections.abc import Callable
 from typing import Any
 
-from httpx import HTTPError
+from httpx2 import HTTPError
 
 from api_client_core import BaseAPI, Endpoint
 from api_client_core.types import RestResponse
@@ -840,16 +840,16 @@ To customize the configuration, pass `config` (a `dict` to replace the default l
 
 The object returned by every endpoint call. Key attributes:
 
-| Attribute       | Type             | Description                                                                                                 |
-|-----------------|------------------|-------------------------------------------------------------------------------------------------------------|
-| `status_code`   | `int`            | HTTP status code.                                                                                           |
-| `response`      | `JSONType`       | Decoded response body (dict, list, str, or `None`).                                                         |
-| `ok`            | `bool`           | `True` if `200 <= status_code < 300`.                                                                       |
-| `request`       | `Request`        | The underlying `httpx` request object, extended with `request_id`, `start_time`, `end_time`, and `retried`. |
-| `_response`     | `httpx.Response` | Raw `httpx` response. Provides access for streaming and low-level response details.                         |
-| `is_stream`     | `bool`           | `True` if this is a streaming response.                                                                     |
-| `request_id`    | `str`            | UUID set per request in the `X-Request-ID` header.                                                          |
-| `response_time` | `float \| None`  | Seconds between request dispatch and response received (`None` for streaming responses).                    |
+| Attribute       | Type               | Description                                                                                                  |
+|-----------------|--------------------|--------------------------------------------------------------------------------------------------------------|
+| `status_code`   | `int`              | HTTP status code.                                                                                            |
+| `response`      | `JSONType`         | Decoded response body (dict, list, str, or `None`).                                                          |
+| `ok`            | `bool`             | `True` if `200 <= status_code < 300`.                                                                        |
+| `request`       | `Request`          | The underlying `httpx2` request object, extended with `request_id`, `start_time`, `end_time`, and `retried`. |
+| `_response`     | `httpx2.Response`  | Raw `httpx2` response. Provides access for streaming and low-level response details.                         |
+| `is_stream`     | `bool`             | `True` if this is a streaming response.                                                                      |
+| `request_id`    | `str`              | UUID set per request in the `X-Request-ID` header.                                                           |
+| `response_time` | `float \| None`    | Seconds between request dispatch and response received (`None` for streaming responses).                     |
 
 ## `Kwargs` and `Unpack`
 
@@ -859,7 +859,7 @@ The object returned by every endpoint call. Key attributes:
 class Kwargs(TypedDict, total=False):
     quiet: bool                 # suppress request/response log output
     with_hooks: bool            # set to False to skip pre/post hooks
-    raw_options: dict[str, Any] # raw httpx client options (timeout, headers, ...)
+    raw_options: dict[str, Any] # raw httpx2 client options (timeout, headers, ...)
 ```
 
 Always include `**kwargs: Unpack[Kwargs]` in your endpoint function signatures so callers can use these options without triggering an "unexpected keyword argument" error:
