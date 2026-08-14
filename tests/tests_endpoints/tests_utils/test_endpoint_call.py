@@ -490,10 +490,11 @@ class TestGenerateRestFuncParams:
     """
 
     def test_empty_params_returns_quiet_only(self) -> None:
-        """Test that calling with no endpoint params produces only the `quiet` key"""
+        """Test that calling with no endpoint params produces only the `quiet` key, defaulting to None
+        (defer to the client's own log_requests default)"""
         endpoint = _make_endpoint({})
         result = endpoint_call_util.generate_rest_func_params(endpoint, {}, {})
-        assert result == {"quiet": False}
+        assert result == {"quiet": None}
 
     def test_quiet_flag_is_propagated(self) -> None:
         """Test that the `quiet` flag is forwarded to the output dict"""

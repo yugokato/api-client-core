@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 from common_libs.clients.rest_client import RestResponse
 from httpx2 import AsyncClient, Client
@@ -153,6 +155,22 @@ class TestEndpointObject:
         assert ep.is_documented is False
         assert ep.is_public is False
         assert ep.is_deprecated is True
+
+    def test_original_func_returns_the_original_function(self, api_client: APIClient) -> None:
+        """Test that Endpoint.original_func returns the original API class function, giving introspection
+        access to its signature and docstring without reaching into the generated model's internals"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/something")
+            def get_something(self, value: int) -> RestResponse:
+                """Get something"""
+                ...
+
+        ep = TestAPI.get_something.endpoint
+        assert ep.original_func.__doc__ == "Get something"
+        assert list(inspect.signature(ep.original_func).parameters) == ["self", "value"]
 
     def test_endpoint_call(self, mocker: MockerFixture, api_client: APIClient, api_class: type[BaseAPI]) -> None:
         """Test that Endpoint.__call__ makes the correct HTTP call and returns RestResponse in sync mode"""

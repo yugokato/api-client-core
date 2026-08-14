@@ -89,7 +89,7 @@ Unset: Any = _UnsetType()
 class Kwargs(TypedDict, total=False):
     """For annotating the `kwargs` param in endpoint functions (PEP 692)"""
 
-    quiet: bool
+    quiet: bool | None
     with_hooks: bool
     raw_options: dict[str, Any]
 

@@ -22,20 +22,32 @@ ClassT = TypeVar("ClassT", bound=BaseAPI)
 get_supported_request_parameters()
 
 
+@pytest.fixture
+def force_color(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force `common_libs.ansi_colors.should_color()` to return `True` regardless of whether stdout is a
+    terminal, for a test that asserts on ANSI-colored output. Needed since `pytest` runs with stdout
+    captured (never a TTY), so such an assertion would otherwise pass vacuously in CI.
+    """
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+
 @pytest.fixture(scope="module")
-def api_client_factory(session_mocker: MockerFixture) -> Callable[..., APIClient]:
+def api_client_factory(module_mocker: MockerFixture) -> Callable[..., APIClient]:
     """Core API client factory"""
+
+    class _APIClient(APIClient):
+        app_name = "test"
 
     def create(async_mode: bool = False, raise_on_error: bool = False) -> APIClient:
         base_url = "https://example.com/api"
         rest_client: RestClient | AsyncRestClient
         if async_mode:
-            session_mocker.patch.object(AsyncClient, "request")
+            module_mocker.patch.object(AsyncClient, "request")
             rest_client = AsyncRestClient(base_url)
         else:
-            session_mocker.patch.object(Client, "request")
+            module_mocker.patch.object(Client, "request")
             rest_client = RestClient(base_url)
-        return APIClient("test", rest_client=rest_client, async_mode=async_mode, raise_on_error=raise_on_error)
+        return _APIClient(rest_client=rest_client, async_mode=async_mode, raise_on_error=raise_on_error)
 
     return create
 

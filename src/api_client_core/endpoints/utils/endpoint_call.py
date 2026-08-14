@@ -178,7 +178,7 @@ def generate_rest_func_params(
     endpoint: Endpoint[Any],
     endpoint_params: dict[str, Any],
     session_headers: dict[str, str],
-    quiet: bool = False,
+    quiet: bool | None = None,
     use_query_string: bool = False,
     **raw_options: Any,
 ) -> dict[str, Any]:

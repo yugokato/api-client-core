@@ -13,7 +13,8 @@ from common_libs.logging import get_logger
 from httpx2 import HTTPError
 
 from ..endpoints import Endpoint
-from ..endpoints.endpoint_func import AsyncEndpointFunc, SyncEndpointFunc
+from ..endpoints.endpoint_func import AsyncEndpointFunc, EndpointFunc, SyncEndpointFunc
+from ..endpoints.endpoint_handler import EndpointHandler
 from ..types import RestResponse
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 
 APIClassT = TypeVar("APIClassT", bound="BaseAPI[Any]")
 APIClientT = TypeVar("APIClientT", bound="APIClient")
+_ClassT = TypeVar("_ClassT")
 
 logger = get_logger(__name__)
 
@@ -155,9 +157,6 @@ class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
 
         Note: This classmethod must be called from the `__init__.py` of a directory that contains API class files.
         """
-        from ..endpoints.endpoint_func import EndpointFunc
-        from ..endpoints.endpoint_handler import EndpointHandler
-
         previous_frame = inspect.currentframe().f_back
         assert previous_frame
         caller_file_path = inspect.getframeinfo(previous_frame).filename
@@ -169,12 +168,7 @@ class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
         api_classes = get_api_classes(api_module, cls)
 
         for api_class in api_classes:
-            api_class.endpoints = []
-            for attr_name, attr in api_class.__dict__.items():
-                if isinstance(attr, EndpointHandler):
-                    endpoint_func: EndpointFunc[Any] = getattr(api_class, attr_name)
-                    assert isinstance(endpoint_func, EndpointFunc)
-                    api_class.endpoints.append(endpoint_func.endpoint)
+            api_class.endpoints = get_endpoints(api_class)
 
         cls.endpoints = sorted(
             itertools.chain(*(x.endpoints for x in api_classes if x.endpoints)),
@@ -206,7 +200,7 @@ def get_api_classes(
     api_classes = sorted(
         (
             cls
-            for cls in _get_subclasses(base_api_class)
+            for cls in get_subclasses(base_api_class)
             if cls.__module__.startswith(f"{api_module_name}.")
             and not cls.__name__.startswith("_")
             and (class_filter is None or class_filter(cls))
@@ -219,7 +213,43 @@ def get_api_classes(
     return api_classes
 
 
-def _get_subclasses(base_api_class: type[APIClassT]) -> set[type[APIClassT]]:
-    """Recursively collect all subclasses of the given class."""
-    direct: set[type[APIClassT]] = set(base_api_class.__subclasses__())
-    return direct.union(*(_get_subclasses(s) for s in direct))
+def get_endpoints(api_class: type[BaseAPI[Any]]) -> list[Endpoint[Any]]:
+    """Return the `Endpoint` for every `EndpointHandler` descriptor reachable from an API class, including
+    one inherited from a base `BaseAPI` subclass.
+
+    Walks `api_class.__mro__` most-derived first, so an attribute name a subclass overrides shadows a base
+    class's own version of it rather than yielding both, whether or not the overriding attribute is itself
+    an `EndpointHandler`: `seen_attr_names` records every attribute name encountered at each level, not just
+    the ones that resolve to an endpoint, so a subclass that shadows an inherited endpoint with a plain,
+    non-endpoint attribute correctly drops that endpoint instead of still trying to resolve it via the
+    shadowing class. Each resolved `EndpointFunc` is still built via `getattr(api_class, attr_name)`, not
+    the base class the descriptor was found on, so its `Endpoint` correctly reports the most-derived class
+    as `api_class`.
+
+    Used by `BaseAPI.init()` to populate `api_class.endpoints`, and by any other caller that needs the
+    same list before (or without) `init()` having run.
+
+    :param api_class: API class to scan for `EndpointHandler` descriptors, including inherited ones
+    """
+    endpoints: list[Endpoint[Any]] = []
+    seen_attr_names: set[str] = set()
+    for klass in api_class.__mro__:
+        for attr_name, attr in klass.__dict__.items():
+            if attr_name in seen_attr_names:
+                continue
+            seen_attr_names.add(attr_name)
+            if not isinstance(attr, EndpointHandler):
+                continue
+            endpoint_func = getattr(api_class, attr_name)
+            assert isinstance(endpoint_func, EndpointFunc)
+            endpoints.append(endpoint_func.endpoint)
+    return endpoints
+
+
+def get_subclasses(base_class: type[_ClassT]) -> set[type[_ClassT]]:
+    """Recursively collect all subclasses of the given class.
+
+    :param base_class: Class to collect subclasses of
+    """
+    direct: set[type[_ClassT]] = set(base_class.__subclasses__())
+    return direct.union(*(get_subclasses(s) for s in direct))

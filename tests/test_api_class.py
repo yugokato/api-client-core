@@ -10,7 +10,7 @@ from pytest_mock import MockerFixture
 
 from api_client_core import endpoint
 from api_client_core.base import APIClient, BaseAPI
-from api_client_core.base.api_class import get_api_classes
+from api_client_core.base.api_class import get_api_classes, get_endpoints
 from api_client_core.endpoints import Endpoint
 
 
@@ -156,6 +156,119 @@ class TestBaseAPIInit:
         result = ReturnBaseAPI.init()
 
         assert result == [ReturnAPI]
+
+
+class TestGetEndpoints:
+    """Tests for get_endpoints()"""
+
+    def test_returns_endpoint_per_handler_in_declaration_order(self, api_client: APIClient) -> None:
+        """Test that get_endpoints() returns one Endpoint per EndpointHandler descriptor, in declaration order"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/first")
+            def first(self) -> RestResponse: ...
+
+            @endpoint.post("/v1/second")
+            def second(self) -> RestResponse: ...
+
+        endpoints = get_endpoints(TestAPI)
+        assert [ep.func_name for ep in endpoints] == ["first", "second"]
+
+    def test_ignores_non_endpoint_handler_attributes(self, api_client: APIClient) -> None:
+        """Test that get_endpoints() ignores class attributes that aren't EndpointHandler descriptors"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client.app_name
+            some_constant = 42
+
+            @endpoint.get("/v1/only")
+            def only(self) -> RestResponse: ...
+
+        endpoints = get_endpoints(TestAPI)
+        assert [ep.func_name for ep in endpoints] == ["only"]
+
+    def test_includes_an_endpoint_inherited_from_a_base_api_subclass(self, api_client: APIClient) -> None:
+        """Test that an endpoint defined on a base `BaseAPI` subclass is included for a subclass that
+        declares no endpoints of its own, and that the resolved `Endpoint.api_class` reports the subclass
+        (not the base class the descriptor was actually defined on), matching normal Python attribute-lookup
+        semantics
+        """
+
+        class SharedBaseAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/shared")
+            def shared(self) -> RestResponse: ...
+
+        class ConcreteAPI(SharedBaseAPI):
+            app_name = api_client.app_name
+
+        endpoints = get_endpoints(ConcreteAPI)
+        assert [ep.func_name for ep in endpoints] == ["shared"]
+        assert endpoints[0].api_class is ConcreteAPI
+
+    def test_a_subclass_override_shadows_the_base_classs_own_endpoint(self, api_client: APIClient) -> None:
+        """Test that a subclass overriding an endpoint under the same attribute name as a base class yields
+        only the subclass's own version, not both
+        """
+
+        class OverriddenBaseAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/old")
+            def get_thing(self) -> RestResponse: ...
+
+        class OverridingAPI(OverriddenBaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/new")
+            def get_thing(self) -> RestResponse: ...
+
+        endpoints = get_endpoints(OverridingAPI)
+        assert [(ep.func_name, ep.path) for ep in endpoints] == [("get_thing", "/v1/new")]
+
+    def test_combines_inherited_and_own_endpoints(self, api_client: APIClient) -> None:
+        """Test that a subclass's own endpoints and an inherited one from its base class are both included,
+        with the subclass's own endpoints listed first (most-derived class scanned first)
+        """
+
+        class MixedBaseAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/inherited")
+            def inherited(self) -> RestResponse: ...
+
+        class MixedAPI(MixedBaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/own")
+            def own(self) -> RestResponse: ...
+
+        endpoints = get_endpoints(MixedAPI)
+        assert [ep.func_name for ep in endpoints] == ["own", "inherited"]
+
+    def test_a_subclass_shadows_an_inherited_endpoint_with_a_plain_attribute(self, api_client: APIClient) -> None:
+        """Test that a subclass overriding an inherited endpoint's attribute name with a plain, non-endpoint
+        attribute drops that endpoint instead of raising, matching how an override with another endpoint
+        (test_a_subclass_override_shadows_the_base_classs_own_endpoint) is already handled
+        """
+
+        class ShadowedBaseAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/thing")
+            def get_thing(self) -> RestResponse: ...
+
+        class ShadowingAPI(ShadowedBaseAPI):
+            app_name = api_client.app_name
+
+            def get_thing(self) -> str:
+                return "not an endpoint"
+
+        endpoints = get_endpoints(ShadowingAPI)
+        assert endpoints == []
 
 
 class TestBaseAPIInstantiation:

@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from copy import deepcopy
 from importlib import resources
-from logging import NullHandler, getLevelNamesMapping, getLogger
+from logging import getLevelNamesMapping
 from typing import Any
 
 import yaml
@@ -110,8 +110,3 @@ def _with_mirrored_common_libs_logger(config: Mapping[str, Any]) -> Mapping[str,
     if __package__ not in loggers or "common_libs" in loggers:
         return config
     return _with_logger_config(config, "common_libs", deepcopy(loggers[__package__]))
-
-
-# Silent by default. Downstream projects can opt in by calling `api_client_core.setup_logging()` explicitly.
-# Until then, attach a NullHandler so this logger never triggers the "No handlers could be found" warning.
-getLogger(__package__).addHandler(NullHandler())
