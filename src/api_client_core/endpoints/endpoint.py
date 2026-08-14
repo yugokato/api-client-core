@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec
 
@@ -57,18 +58,23 @@ class Endpoint(Generic[P]):
             >>> from myproject.clients.my_app.my_app_client import MyAppAPIClient
             >>>
             >>> client = MyAppAPIClient()
-            >>> r = client.Auth.login(username="foo", password="bar")
+            >>> r = client.auth.login(username="foo", password="bar")
             >>> # Above API call can be also done directly from the endpoint object, if you need to:
-            >>> endpoint = client.Auth.login.endpoint
+            >>> endpoint = client.auth.login.endpoint
             >>> r2 = endpoint(client, username="foo", password="bar")
         """
         return self._call(api_client, *args, **kwargs)  # type: ignore[arg-type]
+
+    @property
+    def original_func(self) -> Callable[..., Any]:
+        """The original API class function this endpoint's parameter model was generated from."""
+        return self.model.endpoint_func._original_func
 
     def _call(
         self,
         api_client: APIClientT,
         *args: Any,
-        quiet: bool = False,
+        quiet: bool | None = None,
         with_hooks: bool = True,
         raw_options: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -77,7 +83,9 @@ class Endpoint(Generic[P]):
 
         :param api_client: API client to use for the call
         :param args: Endpoint parameters provided as positional arguments (path and/or body/query parameters)
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call, reducing a failure to one line. Not given
+                      (`None`) defers to the client's own `log_requests` default. An explicit `quiet=False`
+                      overrides a `log_requests=False` client for this call
         :param with_hooks: Invoke pre/post request hooks
         :param raw_options: Raw request options passed to the underlying HTTP library
         :param kwargs: Endpoint parameters provided as keyword arguments (path and/or body/query parameters)

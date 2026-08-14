@@ -795,7 +795,7 @@ class TestAsyncDefEndpointFuncCall:
         assert r.status_code == 200
         spy_generate.assert_not_called()
 
-    async def test_async_def_endpoint_body_composes_with_configurable_wrapper(
+    async def test_async_def_endpoint_body_composes_with_chainable_wrapper(
         self, mocker: MockerFixture, api_client_async: APIClient
     ) -> None:
         """Test that an `async def` endpoint body composes with a chainable `with_xxx()` wrapper"""

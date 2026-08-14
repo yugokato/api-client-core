@@ -854,7 +854,7 @@ class TestFormatReport:
         # There are 14 columns. All timing cols have values so "-" should appear 0 times in data row
         assert "-" not in data_line
 
-    def test_format_report_colors_only_related_columns(self) -> None:
+    def test_format_report_colors_only_related_columns(self, force_color: None) -> None:
         """Test that Yellow and Red are applied only to the 4xx, 5xx, and Error cells."""
         s = EndpointStat(app_name="app", endpoint="GET /mixed")
         s.record_response(200, 0.1)
@@ -873,7 +873,7 @@ class TestFormatReport:
         assert data_line.count(ColorCodes.RED) == 2
         assert data_line.count(ColorCodes.YELLOW) == 1
 
-    def test_format_report_no_color_when_all_success(self) -> None:
+    def test_format_report_no_color_when_all_success(self, force_color: None) -> None:
         """Test that no color codes appear in the data row when all calls are 2xx."""
         s = EndpointStat(app_name="app", endpoint="GET /ok")
         s.record_response(200, 0.1)
@@ -915,7 +915,7 @@ class TestFormatReport:
         assert "POST /login" not in output
         assert "Calls" in output
 
-    def test_format_report_hide_endpoint_col_colors_only_related_columns(self) -> None:
+    def test_format_report_hide_endpoint_col_colors_only_related_columns(self, force_color: None) -> None:
         """Test that with hide_endpoint_col=True, colors land on the shifted 4xx, 5xx, and Error cells."""
         s = EndpointStat(app_name="app", endpoint="GET /mixed")
         s.record_response(200, 0.1)

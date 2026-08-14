@@ -240,6 +240,36 @@ class TestEndpointParamDefinition:
         assert path_spy.spy_return == "/v1/customers/7"
         assert self._body_params(params_spy) == {"customer_type": "vip"}
 
+    def test_positional_only_path_param_by_keyword_raises(self, mocker: MockerFixture, api_client: APIClient) -> None:
+        """Test that a positional-only path param passed by keyword still raises through a direct call --
+        reaching it from the CLI's own keyword-only shape is handled entirely within cli.runner.run(), not by
+        relaxing this framework-level positional-only enforcement for every caller.
+
+        Asserted via two separate substrings rather than one fixed message, since `inspect.Signature.bind_partial()`
+        itself (which `split_params()` re-raises from) worded this differently before Python 3.12 (`'customer_id'
+        parameter is positional only, but was passed as a keyword` vs. `missing a required positional-only argument:
+        'customer_id'`)."""
+        mocker.patch.object(Client, "request")
+        instance = self._make_api(api_client)(api_client)
+        with pytest.raises(TypeError) as exc_info:
+            instance.get_customer_positional_only(customer_id=7, customer_type="vip")
+        assert "'customer_id'" in str(exc_info.value)
+        assert "positional" in str(exc_info.value)
+
+    def test_endpoint_facade_positional_only_param_by_keyword_raises(
+        self, mocker: MockerFixture, api_client: APIClient
+    ) -> None:
+        """Test that the Endpoint facade (endpoint(client, **kwargs)) also still raises for a positional-only
+        param passed by keyword, matching direct call semantics (see the previous test's own docstring for why
+        this is asserted via substrings rather than one fixed message)"""
+        mocker.patch.object(Client, "request")
+        api_class = self._make_api(api_client)
+        endpoint_obj = api_class.get_customer_positional_only.endpoint
+        with pytest.raises(TypeError) as exc_info:
+            endpoint_obj(api_client, customer_id=7, customer_type="vip")
+        assert "'customer_id'" in str(exc_info.value)
+        assert "positional" in str(exc_info.value)
+
     def test_missing_required_path_param_raises(self, mocker: MockerFixture, api_client: APIClient) -> None:
         """Test that omitting a required path param (no default) raises a descriptive ValueError."""
         mocker.patch.object(Client, "request")

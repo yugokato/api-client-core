@@ -26,6 +26,8 @@ jobs:
             has-changes:
               - 'src/**'
               - 'tests/**'
+              - 'examples/**'
+              - 'pyproject.toml'
 
   lint:
     runs-on: ubuntu-latest

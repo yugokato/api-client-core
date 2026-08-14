@@ -5,9 +5,11 @@ API Client Core — A Framework for Building Python API Clients
 [![test](https://github.com/yugokato/api-client-core/actions/workflows/test.yml/badge.svg)](https://github.com/yugokato/api-client-core/actions/workflows/test.yml)
 [![Code style ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 
-**API Client Core** is a framework for building Python API clients with decorator-based endpoint definitions. The `@endpoint` decorators turn plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, execution wrappers, retries, and call statistics.
+**API Client Core** is a framework for building Python API clients with decorator-based endpoint definitions. The `@endpoint` decorators turn plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, call wrappers, retries, and call statistics.
 
-The framework uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
+From the same endpoint definitions, the framework also automatically generates a command-line interface (CLI), allowing every endpoint to be invoked either programmatically or directly from the terminal.
+
+It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
 
 
 # Table of Contents
@@ -26,16 +28,18 @@ The framework uses the [httpx2](https://github.com/pydantic/httpx2)-based REST c
   - [Automatic Discovery (`BaseAPI.init()`)](#automatic-discovery-baseapiinit)
 - [Sync vs Async](#sync-vs-async)
 - [Logging](#logging)
+- [Command-Line Interface (CLI)](#command-line-interface-cli)
 - [Type and Response Reference](#type-and-response-reference)
 - [Extending Core](#extending-core)
 
 
 # Design Goals
 
-- **Decorator-based endpoint definition** — decorate a plain method with `@endpoint` and the framework handles the rest.
+- **Decorator-based endpoint definitions** — decorate a plain method with `@endpoint` and the framework handles the rest.
 - **Sync/async dual-mode** from the same source code — one endpoint definition works with both `sync` and `async` clients.
-- **Batteries-included** for common needs: automatic retries, distributed locking, concurrent execution, streaming responses, and API call statistics.
-- **Extensible** via request/response hooks and decorators.
+- **Batteries-included** — built-in support for automatic retries, distributed locking, concurrent execution, streaming responses, and API call statistics.
+- **Built-in CLI support** — every endpoint definition automatically becomes a CLI command.
+- **Extensible** — customize behavior through request/response hooks and decorators.
 
 
 # Installation
@@ -66,7 +70,7 @@ class UsersAPI(BaseAPI):
         ...
 ```
 
-Call it like a regular Python method through your [API client](#building-an-api-client). The framework automatically builds and sends the HTTP request using the provided arguments and returns a `RestResponse`.  
+Call the endpoint like a regular Python method through your [API client](#building-an-api-client). The framework automatically builds and sends the HTTP request using the provided arguments and returns a `RestResponse`.  
 The same endpoint definition works in both `sync` and `async` mode. See [Sync vs Async](#sync-vs-async) for details.
 
 <details open>
@@ -74,13 +78,12 @@ The same endpoint definition works in both `sync` and `async` mode. See [Sync vs
 
 ```pycon
 >>> client = MyAppAPIClient()
->>> r = client.Users.get_user(user_id=42, include_posts=True)
+>>> r = client.users.get_user(user_id=42, include_posts=True)
 >>> r.status_code
 200
 >>> r.response
 {'id': 42, 'name': 'Jane Doe', 'email': 'jane@example.com', 'posts': [{'id': 1, 'title': 'Hello World'}, {'id': 2, 'title': 'API Design Notes'}]}
 ```
-
 </details>
 
 <details>
@@ -89,14 +92,20 @@ The same endpoint definition works in both `sync` and `async` mode. See [Sync vs
 ```pycon
 # NOTE: This example uses asyncio REPL (python -m asyncio)
 >>> client = MyAppAPIClient(async_mode=True)
->>> r = await client.Users.get_user(user_id=42, include_posts=True)
+>>> r = await client.users.get_user(user_id=42, include_posts=True)
 >>> r.status_code
 200
 >>> r.response
 {'id': 42, 'name': 'Jane Doe', 'email': 'jane@example.com', 'posts': [{'id': 1, 'title': 'Hello World'}, {'id': 2, 'title': 'API Design Notes'}]}
 ```
-
 </details>
+
+You can also call the same endpoint directly from the terminal using the [automatically generated CLI](#command-line-interface-cli):
+
+```bash
+$ api-client my-app users get-user --user-id 42 --include-posts --output json
+{"id": 42, "name": "Jane Doe", "email": "jane@example.com", "posts": [{"id": 1, "title": "Hello World"}, {"id": 2, "title": "API Design Notes"}]}
+````
 
 
 # Building an API Client
@@ -117,7 +126,7 @@ Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `B
 from typing import Annotated, Unpack
 
 from api_client_core import BaseAPI, endpoint
-from api_client_core.types import RestResponse, Kwargs, Query, Unset
+from api_client_core.types import Kwargs, RestResponse, Query, Unset
 
 
 class AuthAPI(BaseAPI):
@@ -154,7 +163,7 @@ class AuthAPI(BaseAPI):
 from typing import Unpack
 
 from api_client_core import BaseAPI, endpoint
-from api_client_core.types import RestResponse, Kwargs, Unset
+from api_client_core.types import Kwargs, RestResponse, Unset
 
 
 class UsersAPI(BaseAPI):
@@ -206,15 +215,17 @@ from .api.users import UsersAPI
 class MyAppAPIClient(APIClient):
     """API client for the my-app service"""
 
+    app_name = "my-app"
+
     def __init__(self, *, base_url: str = "https://api.example.com", async_mode: bool = False, **kwargs: Any) -> None:
-        super().__init__("my-app", base_url=base_url, async_mode=async_mode, **kwargs)
+        super().__init__(base_url=base_url, async_mode=async_mode, **kwargs)
 
     @cached_property
-    def Auth(self) -> AuthAPI:
+    def auth(self) -> AuthAPI:
         return AuthAPI(self)
 
     @cached_property
-    def Users(self) -> UsersAPI:
+    def users(self) -> UsersAPI:
         return UsersAPI(self)
 ```
 
@@ -228,7 +239,7 @@ That's it. At this point, your API client is ready to use.
 >>> from myproject.clients.my_app.my_app_client import MyAppAPIClient
 >>> client = MyAppAPIClient()
 >>> # Make an API call
->>> r = client.Auth.login(username="foo", password="bar")
+>>> r = client.auth.login(username="foo", password="bar")
 2024-01-01T00:00:00.100-0800 - request: POST https://api.example.com/auth/login
 2024-01-01T00:00:00.115-0800 - response: 200 (OK)
 - request_id: a2b20acf-22d5-4131-ac0d-6796bf19d2af
@@ -255,11 +266,11 @@ That's it. At this point, your API client is ready to use.
 > ```python
 > # sync
 > with MyAppAPIClient() as client:
->     r = client.Auth.login(username="foo", password="bar")
+>     r = client.users.list_users()
 >
 > # async
 > async with MyAppAPIClient(async_mode=True) as client:
->     r = await client.Auth.logout()
+>     r = await client.users.list_users()
 > ```
 
 
@@ -319,7 +330,7 @@ def list_items(self, *, page: int = Unset, page_size: int = Unset, **kwargs: Unp
 
 ```pycon
 # instance-level access
->>> client.Auth.login
+>>> client.auth.login
 <AuthAPILoginEndpointFunc object at 0x10f5abcd0>
   endpoint: POST /auth/login
   mapped to: <function AuthAPI.login at 0x10f4d1360>
@@ -337,10 +348,10 @@ Call an endpoint function just like a regular method to make an API request. The
 
 ```python
 # sync
-r = client.Auth.login(username="foo", password="bar")
+r = client.auth.login(username="foo", password="bar")
 
 # async
-r = await client.Auth.login(username="foo", password="bar")
+r = await client.auth.login(username="foo", password="bar")
 ```
 
 Beyond the endpoint's own parameters, the function also accepts framework-level control options and `httpx2` raw options as `**kwargs`. See [`Kwargs`](#kwargs-and-unpack).
@@ -377,9 +388,9 @@ def get_order(self, user_id: int, order_id: int, **kwargs: Unpack[Kwargs]) -> Re
 `Unset` is a sentinel default value for optional parameters. A parameter whose value is `Unset` is **excluded from the request entirely**, unlike `None`, which is still sent to the server — as `null` in the request body, or as an empty value in the query string.
 
 ```python
-r = client.Auth.logout()                              # query string: N/A
-r = client.Auth.logout(redirect_to=None)              # query string: ?redirect_to=
-r = client.Auth.logout(redirect_to="/dashboard")      # query string: ?redirect_to=/dashboard
+r = client.auth.logout()                              # query string: N/A
+r = client.auth.logout(redirect_to=None)              # query string: ?redirect_to=
+r = client.auth.logout(redirect_to="/dashboard")      # query string: ?redirect_to=/dashboard
 ```
 
 Default values other than `Unset` are always included in the request when the caller omits the argument. Use `Unset` when a parameter should be absent unless explicitly provided:
@@ -389,10 +400,10 @@ Default values other than `Unset` are always included in the request when the ca
 @endpoint.get("/v1/items")
 def list_items(self, *, page: int = 1, per_page: int = Unset, **kwargs: Unpack[Kwargs]) -> RestResponse: ...
 
-r = client.Items.list_items()                     # sent: {"page": 1} 
-r = client.Items.list_items(page=2)               # sent: {"page": 2} 
-r = client.Items.list_items(per_page=50)          # sent: {"page": 1, "per_page": 50} 
-r = client.Items.list_items(page=2, per_page=50)  # sent: {"page": 2, "per_page": 50}
+r = client.items.list_items()                     # sent: {"page": 1} 
+r = client.items.list_items(page=2)               # sent: {"page": 2} 
+r = client.items.list_items(per_page=50)          # sent: {"page": 1, "per_page": 50} 
+r = client.items.list_items(page=2, per_page=50)  # sent: {"page": 2, "per_page": 50}
 ```
 
 ### Streaming
@@ -401,19 +412,19 @@ Use `stream()` when you need a streaming response. It executes the same request 
 
 ```python
 # sync
-with client.Events.subscribe.stream(topic="updates") as r:
+with client.events.subscribe.stream(topic="updates") as r:
     for chunk in r.stream():
         print(chunk)
 
 # async
-async with client.Events.subscribe.stream(topic="updates") as r:
+async with client.events.subscribe.stream(topic="updates") as r:
     async for chunk in r.astream():
         print(chunk)
 ```
 
-### Configurable execution wrappers
+### Chainable call wrappers
 
-In addition to `__call__`, every endpoint function also provides the following execution wrappers:
+In addition to `__call__`, every endpoint function also provides the following call wrappers:
 
 | Method                                                                            | Returns    | Description                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |-----------------------------------------------------------------------------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -436,14 +447,14 @@ In addition to `__call__`, every endpoint function also provides the following e
 With automatic retries:
 
 ```python
-r = client.Auth.login.with_retry(condition=429, num_retries=3, retry_after=2)(username="foo", password="bar")
+r = client.auth.login.with_retry(condition=429, num_retries=3, retry_after=2)(username="foo", password="bar")
 ```
 
 Chaining wrappers:
 
 ```python
 # Apply a lock, retry on transient failures, and validate the status code
-r = client.Auth.login.with_lock().with_retry(condition=429).with_expected_status(200)(username="foo", password="bar")
+r = client.auth.login.with_lock().with_retry(condition=429).with_expected_status(200)(username="foo", password="bar")
 ```
 
 > [!TIP]
@@ -452,7 +463,7 @@ r = client.Auth.login.with_lock().with_retry(condition=429).with_expected_status
 > ```python
 > with lock():
 >     with retry(condition=429):
->         r = client.Auth.login(username="foo", password="bar")
+>         r = client.auth.login(username="foo", password="bar")
 >         assert r.status_code == 200
 > ```
 
@@ -469,10 +480,11 @@ r = client.Auth.login.with_lock().with_retry(condition=429).with_expected_status
 
 ```python
 class APIClient:
+
+    app_name: str
+
     def __init__(
         self,
-        app_name: str,
-        /,
         *,
         env: str | None = None,
         base_url: str | None = None,
@@ -483,15 +495,16 @@ class APIClient:
     ) -> None: ...
 ```
 
+Every concrete subclass must assign the `app_name` class attribute.  `__init__` raises `TypeError` if it's missing, empty, or not a `str`.
+
 | Parameter        | Description                                                                                                                                                          |
 |------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `app_name`       | Logical name for the application. Must match `app_name` on any associated API class that sets one.                                                                   |
 | `env`            | Optional target environment label (e.g., `"dev"`, `"prod"`). Accessible on API class instances via `self.env`.                                                      |
 | `base_url`       | Base URL prepended to every endpoint path. Mutually exclusive with `rest_client`.                                                                                    |
 | `rest_client`    | Pre-configured `RestClient` or `AsyncRestClient` to inject. Use this when you need full control over transport-level settings (TLS, proxies, session cookies, etc.). |
 | `async_mode`     | Set to `True` to enable async mode. All endpoint calls must then be awaited.                                                                                         |
 | `raise_on_error` | Set to `True` to raise an exception on any non-2xx response. Status codes declared via `with_expected_status()` are exempt.                                          |
-| `**kwargs`       | Additional keyword arguments forwarded to the underlying REST client constructor (e.g., `retry_policy`, `rate_limit`, `headers`, `timeout`, `verify`).                |
+| `**kwargs`       | Additional keyword arguments forwarded to the underlying REST client constructor (e.g., `retry_policy`, `rate_limit`, `headers`, `timeout`).                |
 
 
 ## API Class (`BaseAPI`)
@@ -616,9 +629,9 @@ class MyAppBaseAPI(BaseAPI):
         **params: Any,
     ) -> None:
         if response and response.ok:
-            if endpoint == self.api_client.Auth.login.endpoint:
+            if endpoint == self.api_client.auth.login.endpoint:
                 self.api_client.rest_client.set_bearer_token(response.response["token"])
-            elif endpoint == self.api_client.Auth.logout.endpoint:
+            elif endpoint == self.api_client.auth.logout.endpoint:
                 self.api_client.rest_client.unset_bearer_token()
 ```
 
@@ -643,9 +656,9 @@ class MyAppBaseAPI(BaseAPI):
 `str(endpoint)` returns `"METHOD /path"` (e.g., `"POST /auth/login"`).
 
 ```pycon
->>> print(client.Auth.login.endpoint)
+>>> print(client.auth.login.endpoint)
 POST /auth/login
->>> pprint(client.Auth.login.endpoint)
+>>> pprint(client.auth.login.endpoint)
 Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>,
          method='post',
          path='/auth/login',
@@ -661,8 +674,8 @@ Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>,
 The `Endpoint` object is also callable. This lets you dispatch a request directly from an endpoint object, if needed:
 
 ```pycon
->>> endpoint = client.Auth.login.endpoint
->>> r = endpoint(client, username="foo", password="bar")   # equivalent to client.Auth.login(username="foo", password="bar")
+>>> endpoint = client.auth.login.endpoint
+>>> r = endpoint(client, username="foo", password="bar")   # equivalent to client.auth.login(username="foo", password="bar")
 ```
 
 ### `EndpointModel`
@@ -670,7 +683,7 @@ The `Endpoint` object is also callable. This lets you dispatch a request directl
 Each `Endpoint` object exposes a `model` attribute containing a dynamically generated frozen `dataclass` that describes the endpoint's parameters.
 
 ```pycon
->>> model = client.Auth.login.endpoint.model
+>>> model = client.auth.login.endpoint.model
 >>> print(model)
 <class 'AuthAPILoginEndpointModel'>
 >>> pprint(model.__dataclass_fields__, sort_dicts=False)
@@ -689,8 +702,8 @@ Call `Stats.show()` to display a formatted summary of recorded endpoint activity
 
 ```pycon
 >>> from api_client_core.endpoints import Stats
->>> client.Auth.login.with_concurrency(num=10)(username="foo", password="bar")
->>> client.Users.get_user(user_id=42)
+>>> client.auth.login.with_concurrency(num=10)(username="foo", password="bar")
+>>> client.users.get_user(user_id=42)
 >>> Stats.show()
                                                                                    Latency (ms)             
                                                                     ----------------------------------------
@@ -723,7 +736,7 @@ Use `Stats.collect()` context manager to measure metrics inside a specific block
 
 ```python
 with Stats.collect("login-flow") as stats:
-    r = client.Auth.login(username="foo", password="bar")
+    r = client.auth.login(username="foo", password="bar")
 
 stats.show()  # only the calls inside the `with` block
 Stats.show()  # all calls ever made
@@ -734,7 +747,7 @@ Scopes can be nested: an inner `collect()` block sees only its own calls, while 
 For a one-off scoped report on a single endpoint, the `with_stats()` wrapper is a shortcut for the above: it opens a scoped collector around the call and prints the report (filtered to that endpoint) once the call completes:
 
 ```python
-r = client.Auth.login.with_stats().with_concurrency(num=10)(username="foo", password="bar")
+r = client.auth.login.with_stats().with_concurrency(num=10)(username="foo", password="bar")
 ```
 
 ### Cross-process aggregation
@@ -834,6 +847,33 @@ All of the package's logs are emitted under the `api_client_core` logger name.
 To customize the configuration, pass `config` (a `dict` to replace the default logging config) and/or `delta_config` (a `dict` to merge changes into the base config). See the [default logging configuration](src/api_client_core/cfg/logging.yaml) for the default settings. For the common case of only changing verbosity, pass `level` (e.g. `setup_logging(level="DEBUG")`) instead of building a full `delta_config`.
 
 
+# Command-Line Interface (CLI)
+
+Installing the package also provides an `api-client` command that automatically exposes your API clients as a command-line interface. API classes become command groups, endpoint functions become commands, and function parameters become command-line options. Since the CLI is generated directly from your endpoint definitions, it always stays in sync with your code.
+
+Use the following syntax to invoke any endpoint call:
+
+```bash
+api-client <app-name> <resource-group> <command> [OPTIONS]
+```
+
+For example, the following Python call we used earlier:
+
+```pycon
+client.users.get_user(user_id=42, include_posts=True)
+```
+
+becomes:
+
+```bash
+api-client my-app users get-user --user-id 42 --include-posts
+```
+
+Use `-h`/`--help` at any level to explore available clients, resources, commands, and command options.
+
+See [`cli/README.md`](src/api_client_core/cli/README.md) for the full CLI guide.
+
+
 # Type and Response Reference
 
 ## `RestResponse`
@@ -857,7 +897,7 @@ The object returned by every endpoint call. Key attributes:
 
 ```python
 class Kwargs(TypedDict, total=False):
-    quiet: bool                 # suppress request/response log output
+    quiet: bool | None          # suppress request/response logs. None defers to the client's log_requests default
     with_hooks: bool            # set to False to skip pre/post hooks
     raw_options: dict[str, Any] # raw httpx2 client options (timeout, headers, ...)
 ```
@@ -910,7 +950,7 @@ Use `File` to upload files via `multipart/form-data`. Pass each uploaded file as
 ```python
 from api_client_core.types import File
 
-r = client.Users.upload_documents(
+r = client.users.upload_documents(
     avatar=File("avatar.png", b"<png bytes>", "image/png"),
     resume=File("resume.pdf", b"<pdf bytes>", "application/pdf"),
 )

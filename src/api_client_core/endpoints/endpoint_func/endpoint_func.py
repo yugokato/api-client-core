@@ -120,7 +120,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
     async def _call(
         self,
         *args: Any,
-        quiet: bool = False,
+        quiet: bool | None = None,
         with_hooks: bool | None = True,
         raw_options: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -132,7 +132,9 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
         treated as body or query parameters.
 
         :param args: Endpoint parameters provided as positional arguments (path and/or body/query parameters)
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call, reducing a failure to one line. Not given
+                      (`None`) defers to the client's own `log_requests` default. An explicit `quiet=False`
+                      overrides a `log_requests=False` client for this call
         :param with_hooks: Invoke pre/post request hooks
         :param raw_options: Raw request options passed to the underlying HTTP library
         :param kwargs: Endpoint parameters provided as keyword arguments (path and/or body/query parameters)
@@ -160,7 +162,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
             call_kwargs: dict[str, Any] = {}
             if raw_options:
                 call_kwargs.update(raw_options=raw_options)
-            if quiet:
+            if quiet is not None:
                 call_kwargs.update(quiet=quiet)
             r = await self._call_original_func(args, kwargs, call_kwargs)
             if r is not None:
@@ -210,7 +212,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
         return endpoint_model_util.create_endpoint_model(self)
 
     def _generate_call_params(
-        self, quiet: bool, raw_options: dict[str, Any] | None, body_or_query_params: dict[str, Any]
+        self, quiet: bool | None, raw_options: dict[str, Any] | None, body_or_query_params: dict[str, Any]
     ) -> dict[str, Any]:
         """Generate params to pass to the underlying rest client call for a request."""
         sig_defaults = endpoint_call_util.get_signature_defaults(self._original_func, self.path)
@@ -303,7 +305,7 @@ class SyncEndpointFunc(SyncCallWrapperMixin[P], EndpointFunc[P]):
     def _stream(
         self,
         *args: Any,
-        quiet: bool = False,
+        quiet: bool | None = None,
         with_hooks: bool | None = True,
         raw_options: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -311,7 +313,9 @@ class SyncEndpointFunc(SyncCallWrapperMixin[P], EndpointFunc[P]):
         """Stream the response (implementation)
 
         :param args: Endpoint parameters provided as positional arguments (path and/or body/query parameters)
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call, reducing a failure to one line. Not given
+                      (`None`) defers to the client's own `log_requests` default. An explicit `quiet=False`
+                      overrides a `log_requests=False` client for this call
         :param with_hooks: Invoke pre/post request hooks
         :param raw_options: Raw request options passed to the underlying HTTP library
         :param kwargs: Endpoint parameters provided as keyword arguments (path and/or body/query parameters)
@@ -391,7 +395,7 @@ class AsyncEndpointFunc(AsyncCallWrapperMixin[P], EndpointFunc[P]):
     async def _stream(
         self,
         *args: Any,
-        quiet: bool = False,
+        quiet: bool | None = None,
         with_hooks: bool | None = True,
         raw_options: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -399,7 +403,9 @@ class AsyncEndpointFunc(AsyncCallWrapperMixin[P], EndpointFunc[P]):
         """Stream response from an API call to the endpoint (implementation)
 
         :param args: Endpoint parameters provided as positional arguments (path and/or body/query parameters)
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call, reducing a failure to one line. Not given
+                      (`None`) defers to the client's own `log_requests` default. An explicit `quiet=False`
+                      overrides a `log_requests=False` client for this call
         :param with_hooks: Invoke pre/post request hooks
         :param raw_options: Raw request options passed to the underlying HTTP library
         :param kwargs: Endpoint parameters provided as keyword arguments (path and/or body/query parameters)

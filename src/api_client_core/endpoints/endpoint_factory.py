@@ -47,24 +47,24 @@ class endpoint:
         >>>         ...
         >>>
         >>> client = MyAppAPIClient()
-        >>> type(client.Auth.login)
+        >>> type(client.auth.login)
         <class 'AuthAPILoginEndpointFunc'>
         >>> type(AuthAPI.login)
         <class 'AuthAPILoginEndpointFunc'>
         >>> from api_client_core import EndpointFunc
-        >>> isinstance(client.Auth.login, EndpointFunc) and isinstance(AuthAPI.login, EndpointFunc)
+        >>> isinstance(client.auth.login, EndpointFunc) and isinstance(AuthAPI.login, EndpointFunc)
         True
-        >>> client.Auth.login.endpoint
+        >>> client.auth.login.endpoint
         Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>, method='post', path='/v1/auth/login', func_name='login', model=<class 'AuthAPILoginEndpointModel'>, url='https://api.my-app.com/v1/auth/login', content_type=None, is_public=False, is_documented=True, is_deprecated=False)
         >>> AuthAPI.login.endpoint
         Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>, method='post', path='/v1/auth/login', func_name='login', model=<class 'AuthAPILoginEndpointModel'>, url=None, content_type=None, is_public=False, is_documented=True, is_deprecated=False)
-        >>> str(client.Auth.login.endpoint)
+        >>> str(client.auth.login.endpoint)
         'POST /v1/auth/login'
         >>> str(AuthAPI.login.endpoint)
         'POST /v1/auth/login'
-        >>> client.Auth.login.endpoint.path
+        >>> client.auth.login.endpoint.path
         '/v1/auth/login'
-        >>> client.Auth.login.endpoint.url
+        >>> client.auth.login.endpoint.url
         'https://api.my-app.com/v1/auth/login'
 
     """  # noqa: E501

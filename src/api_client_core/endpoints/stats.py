@@ -521,7 +521,7 @@ class Stats:
         Example::
 
             with Stats.collect("login-flow") as stats:
-                client.Auth.login(username="foo", password="bar")
+                client.auth.login(username="foo", password="bar")
 
             stats.show()  # Only the login call
             Stats.show()  # All calls ever made

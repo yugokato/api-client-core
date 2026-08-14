@@ -12,10 +12,11 @@ logger = get_logger(__name__)
 class APIClient:
     """General API test client base class. All clients must inherit from this class"""
 
+    # Every concrete subclass must assign the `app_name`.
+    app_name: str | None = None
+
     def __init__(
         self,
-        app_name: str,
-        /,
         *,
         env: str | None = None,
         base_url: str | None = None,
@@ -26,7 +27,6 @@ class APIClient:
     ):
         """Initialize the API client
 
-        :param app_name: App name
         :param env: Target environment
         :param base_url: Base URL for the API
         :param rest_client: Pre-configured REST client (mutually exclusive with base_url)
@@ -36,6 +36,10 @@ class APIClient:
                                `with_expected_status()` are exempt from the raise.
         :param kwargs: Additional keyword arguments passed to the REST client constructor
         """
+        app_name = type(self).app_name
+        if not isinstance(app_name, str) or not app_name:
+            raise TypeError(f"{type(self).__name__} must set a non-empty 'app_name' class attribute")
+
         if not async_mode:
             try:
                 asyncio.get_running_loop()
@@ -47,7 +51,6 @@ class APIClient:
                     f"to enable async mode."
                 )
 
-        self.app_name = app_name
         self.env = env
         self.async_mode = async_mode
         self.raise_on_error = raise_on_error
