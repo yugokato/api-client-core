@@ -65,10 +65,10 @@ def add_wrapper_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         const={},
         default=NOT_PROVIDED,
-        type=_spec_parser(_RETRY_SPEC, primary="num_retries", multi=frozenset({"condition"}), minimums=_RETRY_MINIMUMS),
+        type=_spec_parser(_RETRY_SPEC, primary="condition", multi=frozenset({"condition"}), minimums=_RETRY_MINIMUMS),
         action=_OrderedWrapperAction,
         metavar="SPEC",
-        help="Retry on failure. Bare flag retries any non-2xx response once.\nSPEC: NUM_RETRIES, or "
+        help="Retry on failure. Bare flag retries any non-2xx response once.\nSPEC: STATUS, or "
         "condition=STATUS (repeatable), num_retries=N, retry_after=SECONDS, safe_methods_only=BOOL",
     )
     group.add_argument(
