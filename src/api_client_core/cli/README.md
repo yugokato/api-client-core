@@ -244,8 +244,7 @@ Most of the framework's chainable [call wrappers](../../../README.md#chainable-c
 For example:
 
 ```bash
-api-client DummyJSON products list-products \
-    --limit 100 \
+api-client DummyJSON products list-products --limit 100 \
     --with-stats \
     --with-retry condition=429,num_retries=3 \
     --with-concurrency 10
@@ -254,7 +253,7 @@ api-client DummyJSON products list-products \
 The CLI form follows these rules:
 - Wrappers are applied in the order they appear on the command line, just as they are when chained in Python.
 - Option values can be provided as a comma-separated `key=value` spec. e.g. `--with-retry condition=429,num_retries=3`. 
-- A bare value is shorthand for the wrapper's primary option. `--with-retry 3` is equivalent to `--with-retry num_retries=3`.
+- A bare value is shorthand for the wrapper's primary option. `--with-retry 429` is equivalent to `--with-retry condition=429`.
 
 Use `--help` on any leaf command for the exact wrapper options and syntax supported.
 

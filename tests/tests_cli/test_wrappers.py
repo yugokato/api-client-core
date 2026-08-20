@@ -70,13 +70,18 @@ class TestAddWrapperArguments:
         args = _build_parser().parse_args(["--with-retry", "condition=429,condition=503,num_retries=2"])
         assert args.with_retry == {"condition": [429, 503], "num_retries": 2}
 
-    def test_with_retry_bare_value_is_shorthand_for_num_retries(self) -> None:
-        """Test that --with-retry N (a bare, unkeyed value) is shorthand for num_retries=N, mirroring the
-        same bare-value shorthand --with-rate-limit/--with-repeat/--with-concurrency already offer for
+    def test_with_retry_bare_value_is_shorthand_for_condition(self) -> None:
+        """Test that --with-retry STATUS (a bare, unkeyed value) is shorthand for condition=STATUS, mirroring
+        the same bare-value shorthand --with-rate-limit/--with-repeat/--with-concurrency already offer for
         their own most common single option
         """
-        args = _build_parser().parse_args(["--with-retry", "3"])
-        assert args.with_retry == {"num_retries": 3}
+        args = _build_parser().parse_args(["--with-retry", "429"])
+        assert args.with_retry == {"condition": 429}
+
+    def test_with_retry_bare_value_can_combine_with_a_keyed_option(self) -> None:
+        """Test that a bare primary (condition) value and a keyed option can be combined in one spec"""
+        args = _build_parser().parse_args(["--with-retry", "429,num_retries=3"])
+        assert args.with_retry == {"condition": 429, "num_retries": 3}
 
     def test_with_retry_bare_boolean_key_is_true(self) -> None:
         """Test that a bare boolean spec key (no =value) is treated as key=True"""
