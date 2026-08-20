@@ -2374,5 +2374,7 @@ def _raise_with_request(exc: Exception, method: str) -> NoReturn:
     :param exc: Exception to raise
     :param method: HTTP method string (e.g. "GET", "POST") to embed in the attached request
     """
-    set_request_to_exception(exc, Request(method, "https://example.com/api/v1/something"))
+    request = Request(method, "https://example.com/api/v1/something")
+    request.request_id = str(uuid4())
+    set_request_to_exception(exc, request)
     raise exc
