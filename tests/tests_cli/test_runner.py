@@ -690,7 +690,7 @@ class TestHeaderFlag:
         """
         mocker.patch.object(Endpoint, "_call", return_value=make_rest_response(mocker, 200))
         rest_client = RestClient("https://example.com/api")
-        rest_client.set_bearer_token("old-token")
+        rest_client.token = "old-token"
 
         run(
             CliTestClient,
@@ -698,7 +698,8 @@ class TestHeaderFlag:
             rest_client=rest_client,
         )
 
-        assert rest_client.get_bearer_token() == "new-token"
+        assert rest_client.auth is None
+        assert rest_client.client.headers["Authorization"] == "Bearer new-token"
 
     def test_omitting_header_flag_leaves_a_bearer_token_the_client_set_for_itself_untouched(
         self, mocker: MockerFixture
@@ -706,11 +707,11 @@ class TestHeaderFlag:
         """Test that omitting -H entirely doesn't clear a bearer token the client set for itself"""
         mocker.patch.object(Endpoint, "_call", return_value=make_rest_response(mocker, 200))
         rest_client = RestClient("https://example.com/api")
-        rest_client.set_bearer_token("keep-me")
+        rest_client.token = "keep-me"
 
         run(CliTestClient, ["widgets", "get-widget", "--widget-id", "1"], rest_client=rest_client)
 
-        assert rest_client.get_bearer_token() == "keep-me"
+        assert rest_client.token == "keep-me"
 
     def test_malformed_header_exits_cleanly_rather_than_crashing(self) -> None:
         """Test that a malformed -H value raises SystemExit via argparse (a clean error and exit code

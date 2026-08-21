@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Unpack
 
 import pytest
 from common_libs.clients.rest_client import RestResponse
@@ -11,6 +12,7 @@ from pytest_mock import MockerFixture
 
 from api_client_core import Endpoint, endpoint
 from api_client_core.base import APIClient, BaseAPI
+from api_client_core.types import Kwargs
 
 
 class TestEndpointObject:
@@ -189,3 +191,18 @@ class TestEndpointObject:
         r = await ep(api_client_async)
         assert isinstance(r, RestResponse)
         mock_httpx_request.assert_called_once()
+
+    def test_endpoint_call_forwards_auth_raw_option(self, mocker: MockerFixture, api_client: APIClient) -> None:
+        """Test that a per-call `raw_options={"auth": ...}` passed to Endpoint.__call__ reaches the underlying
+        HTTP request"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/something")
+            def get_something(self, **kwargs: Unpack[Kwargs]) -> RestResponse: ...
+
+        mock_httpx_request = mocker.patch.object(Client, "request")
+        ep = TestAPI.get_something.endpoint
+        ep(api_client, raw_options={"auth": None})
+        assert mock_httpx_request.call_args.kwargs["auth"] is None

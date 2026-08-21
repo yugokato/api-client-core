@@ -236,6 +236,8 @@ api-client DummyJSON auth get-current-user -H "Authorization: Bearer $TOKEN"
 > [!TIP]
 > `-H`/`--header` also supports `@<path>` (or `-` for stdin) to read one or more `NAME:VALUE` header lines from a file or stdin instead. This can help keep sensitive values out of shell history.
 
+A client may set up its own auth (see the main [README's Authentication section](../../../README.md#authentication)), applied to every command automatically with no `-H` needed. An explicit `-H "Authorization: ..."` still overrides it for that one run. `--raw-option auth=null` instead sends a single command unauthenticated, bypassing whatever auth the client installed for itself.
+
 
 # Call Wrappers
 
