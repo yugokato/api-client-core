@@ -25,7 +25,7 @@ class DummyJSONBaseAPI(BaseAPI["DummyJSONClient"]):
         """Automatically attach the access token from a successful login/refresh as the bearer token"""
         auth_endpoints = (self.api_client.auth.login.endpoint, self.api_client.auth.refresh_token.endpoint)
         if response and response.ok and endpoint in auth_endpoints:
-            self.api_client.rest_client.set_bearer_token(response.response["accessToken"])
+            self.api_client.rest_client.token = response.response["accessToken"]
 
 
 API_CLASSES = DummyJSONBaseAPI.init()

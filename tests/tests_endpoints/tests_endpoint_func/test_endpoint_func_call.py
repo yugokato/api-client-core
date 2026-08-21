@@ -7,13 +7,13 @@ import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
-from typing import Any
+from typing import Any, Unpack
 from unittest.mock import MagicMock
 
 import pytest
 from common_libs.clients.rest_client import RestResponse
 from common_libs.clients.rest_client.types import Request, Response
-from httpx2 import AsyncClient, Client, ConnectError, HTTPError, HTTPStatusError
+from httpx2 import USE_CLIENT_DEFAULT, AsyncClient, Client, ConnectError, HTTPError, HTTPStatusError
 from pytest_mock import MockerFixture
 
 import api_client_core.endpoints.endpoint_func.endpoint_func as _endpoint_func_module
@@ -21,7 +21,7 @@ import api_client_core.endpoints.utils.endpoint_call as endpoint_call_util
 from api_client_core.base import APIClient, BaseAPI
 from api_client_core.endpoints import AsyncEndpointFunc, SyncEndpointFunc, endpoint
 from api_client_core.endpoints.executors import AsyncExecutor, SyncExecutor
-from api_client_core.types import Unset
+from api_client_core.types import Kwargs, Unset
 
 
 class TestSyncEndpointFuncCall:
@@ -49,6 +49,49 @@ class TestSyncEndpointFuncCall:
 
         instance.get_something()
         mock_httpx_request.assert_called_once()
+
+    def test_sync_call_forwards_auth_raw_option(self, mocker: MockerFixture, api_client: APIClient) -> None:
+        """Test that a per-call `raw_options={"auth": ...}` reaches the underlying HTTP request, and that the
+        request defaults to USE_CLIENT_DEFAULT (defer to the client's own auth) when no `auth` raw option is
+        given"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/something")
+            def get_something(self, **kwargs: Unpack[Kwargs]) -> RestResponse: ...
+
+        mock_httpx_request = mocker.patch.object(Client, "request")
+        instance = TestAPI(api_client)
+
+        instance.get_something(raw_options={"auth": None})
+        assert mock_httpx_request.call_args.kwargs["auth"] is None
+
+        instance.get_something()
+        assert mock_httpx_request.call_args.kwargs["auth"] is USE_CLIENT_DEFAULT
+
+    def test_sync_call_raw_option_overrides_decorator_level_auth_default(
+        self, mocker: MockerFixture, api_client: APIClient
+    ) -> None:
+        """Test that a decorator-level `auth` default (e.g. `@endpoint.get(path, auth=None)`, declaring an
+        endpoint unauthenticated) reaches the request, and that a per-call `raw_options={"auth": ...}` wins
+        over it"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client.app_name
+
+            @endpoint.get("/v1/something", auth=None)
+            def get_something(self, **kwargs: Unpack[Kwargs]) -> RestResponse: ...
+
+        mock_httpx_request = mocker.patch.object(Client, "request")
+        instance = TestAPI(api_client)
+
+        instance.get_something()
+        assert mock_httpx_request.call_args.kwargs["auth"] is None
+
+        call_auth = object()
+        instance.get_something(raw_options={"auth": call_auth})
+        assert mock_httpx_request.call_args.kwargs["auth"] is call_auth
 
     def test_sync_call_invokes_pre_and_post_hooks(self, mocker: MockerFixture, api_client: APIClient) -> None:
         """Test that pre_request_hook and post_request_hook are called during sync execution"""
@@ -427,6 +470,28 @@ class TestAsyncEndpointFuncCall:
 
         await instance.get_something()
         mock_httpx_request.assert_called_once()
+
+    async def test_async_call_forwards_auth_raw_option(
+        self, mocker: MockerFixture, api_client_async: APIClient
+    ) -> None:
+        """Test that a per-call `raw_options={"auth": ...}` reaches the underlying HTTP request, and that the
+        request defaults to USE_CLIENT_DEFAULT (defer to the client's own auth) when no `auth` raw option is
+        given"""
+
+        class TestAPI(BaseAPI):
+            app_name = api_client_async.app_name
+
+            @endpoint.get("/v1/something")
+            def get_something(self, **kwargs: Unpack[Kwargs]) -> RestResponse: ...
+
+        mock_httpx_request = mocker.patch.object(AsyncClient, "request")
+        instance = TestAPI(api_client_async)
+
+        await instance.get_something(raw_options={"auth": None})
+        assert mock_httpx_request.call_args.kwargs["auth"] is None
+
+        await instance.get_something()
+        assert mock_httpx_request.call_args.kwargs["auth"] is USE_CLIENT_DEFAULT
 
     async def test_async_call_invokes_pre_and_post_hooks(
         self, mocker: MockerFixture, api_client_async: APIClient

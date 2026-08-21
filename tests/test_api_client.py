@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 from common_libs.clients.rest_client import AsyncRestClient, RestClient
+from common_libs.clients.rest_client.auth import BearerAuth
 from httpx2 import AsyncClient, Client
 from pytest_mock import MockerFixture
 
@@ -95,6 +96,13 @@ class TestAPIClientInit:
         rest_client = RestClient(BASE_URL)
         with pytest.raises(ValueError, match="Additional keyword arguments are not supported"):
             MyAppClient(rest_client=rest_client, timeout=30)
+
+    def test_init_forwards_auth_kwarg_to_underlying_rest_client(self) -> None:
+        """Test that an `auth` kwarg passed to the client constructor is forwarded to the underlying REST client
+        as part of `**kwargs`, the same as any other REST client option"""
+        auth = BearerAuth("token")
+        client = MyAppClient(base_url=BASE_URL, auth=auth)
+        assert client.rest_client.auth is auth
 
     def test_init_raises_when_sync_rest_client_given_in_async_mode(self) -> None:
         """Test that passing a sync RestClient with async_mode=True raises TypeError"""

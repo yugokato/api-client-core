@@ -70,7 +70,7 @@ def run(
 
     One or more `-H`/`--header` flags are applied to the client's underlying httpx2 client once constructed,
     so protected endpoints can be reached without a client-specific auth mechanism. A `-H` header named
-    `Authorization` overrides any bearer token the client set for itself, rather than being silently
+    `Authorization` overrides any auth the client installed for itself, rather than being silently
     overridden by it.
 
     A resource or command given with nothing after it (e.g. `api-client my-app users`, with no command) is
@@ -171,8 +171,8 @@ def _apply_headers(client: APIClient, headers: list[tuple[str, str]]) -> None:
     and discovery silently drops any candidate whose constructor rejects an unexpected kwarg, so threading
     headers the same way would risk hiding an otherwise-valid client the moment it's given a `-H` flag.
 
-    An explicit header named `Authorization` (case-insensitively) first clears any bearer token the client
-    may have set for itself, since that token is otherwise applied on every request after header merging and
+    An explicit header named `Authorization` (case-insensitively) first clears any auth the client may have
+    installed for itself, since that auth is otherwise applied on every request after header merging and
     would silently override an explicit `-H "Authorization: ..."`. The given headers then replace any value
     the client itself already set for the same name, matching `httpx2.Headers.update()`'s own behavior. Two
     `-H` flags naming the same header both still reach the request as separate values (`httpx2.Headers.update()`
@@ -184,7 +184,7 @@ def _apply_headers(client: APIClient, headers: list[tuple[str, str]]) -> None:
     if not headers:
         return
     if any(name.lower() == "authorization" for name, _ in headers):
-        client.rest_client.unset_bearer_token()
+        client.rest_client.auth = None
     client.rest_client.client.headers.update(headers)
 
 

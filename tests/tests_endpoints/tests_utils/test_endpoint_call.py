@@ -780,3 +780,9 @@ class TestValidateRawOptions:
         """
         with pytest.raises(RuntimeError, match="Invalid raw option"):
             endpoint_call_util.validate_raw_options({"quiet": True})
+
+    def test_auth_is_accepted(self) -> None:
+        """Test that `auth` is accepted as both a decorator-level default and a call-time raw option, unlike
+        `quiet`, since nothing in the call path passes it as an explicit keyword of its own
+        """
+        endpoint_call_util.validate_raw_options({"auth": None})

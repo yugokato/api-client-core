@@ -26,6 +26,7 @@ It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from 
   - [Endpoint Object (`Endpoint`)](#endpoint-object-endpoint)
   - [API Statistics (`Stats`)](#api-statistics-stats)
   - [Automatic Discovery (`BaseAPI.init()`)](#automatic-discovery-baseapiinit)
+- [Authentication](#authentication)
 - [Sync vs Async](#sync-vs-async)
 - [Logging](#logging)
 - [Command-Line Interface (CLI)](#command-line-interface-cli)
@@ -499,12 +500,12 @@ Every concrete subclass must assign the `app_name` class attribute.  `__init__` 
 
 | Parameter        | Description                                                                                                                                                          |
 |------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `env`            | Optional target environment label (e.g., `"dev"`, `"prod"`). Accessible on API class instances via `self.env`.                                                      |
+| `env`            | Optional target environment label (e.g., `"dev"`, `"prod"`). Accessible on API class instances via `self.env`.                                                       |
 | `base_url`       | Base URL prepended to every endpoint path. Mutually exclusive with `rest_client`.                                                                                    |
 | `rest_client`    | Pre-configured `RestClient` or `AsyncRestClient` to inject. Use this when you need full control over transport-level settings (TLS, proxies, session cookies, etc.). |
 | `async_mode`     | Set to `True` to enable async mode. All endpoint calls must then be awaited.                                                                                         |
 | `raise_on_error` | Set to `True` to raise an exception on any non-2xx response. Status codes declared via `with_expected_status()` are exempt.                                          |
-| `**kwargs`       | Additional keyword arguments forwarded to the underlying REST client constructor (e.g., `retry_policy`, `rate_limit`, `headers`, `timeout`).                |
+| `**kwargs`       | Additional keyword arguments forwarded to the underlying REST client constructor (e.g., `auth`, `retry_policy`, `rate_limit`, `headers`, `timeout`).                 |
 
 
 ## API Class (`BaseAPI`)
@@ -630,9 +631,9 @@ class MyAppBaseAPI(BaseAPI):
     ) -> None:
         if response and response.ok:
             if endpoint == self.api_client.auth.login.endpoint:
-                self.api_client.rest_client.set_bearer_token(response.response["token"])
+                self.api_client.rest_client.token = response.response["token"]
             elif endpoint == self.api_client.auth.logout.endpoint:
-                self.api_client.rest_client.unset_bearer_token()
+                self.api_client.rest_client.auth = None
 ```
 
 
@@ -796,6 +797,38 @@ GET /users
 > `BaseAPI.init()` must be called from an `__init__.py` file. Calling it from any other module raises a `RuntimeError`.
 
 
+# Authentication
+
+`auth` is a plain pass-through option to the underlying REST client (`httpx2`), the same as `timeout`, `headers`, etc. 
+
+You can specify `auth` in three places:
+
+- At client construction, as part of `APIClient.__init__`'s `**kwargs` (forwarded to the REST client
+  constructor), applied to every request the client makes unless overridden below.
+- At the endpoint decorator, as part of `**default_raw_options` (see
+  [Endpoint Factory](#endpoint-factory-endpoint)), applied to every call to that one endpoint.
+- Per call, via `raw_options`, overriding both of the above for that one call.
+
+It accepts any `httpx2.Auth` instance, or a callable that returns one. `api_client_core` re-exports several auth classes you can use as-is, including `BasicAuth` (username/password, from `httpx2`), `BearerAuth` (a static token), `APIKeyAuth` (a header or query-string key), and `TokenProviderAuth` (a sync or async token provider with caching, expiry, and token refresh on 401).
+
+
+### `TokenProviderAuth`
+
+`TokenProviderAuth` wraps a zero-argument callable that fetches a token, caching and refreshing it as it expires or (by default) when the server returns 401:
+
+```python
+from api_client_core.auth import Token, TokenProviderAuth
+
+def fetch_token() -> Token:
+    r = client.auth.login(username="myuser", password="mypass", raw_options={"auth": None}, quiet=True)
+    return Token(r.response["token"], expires_in=r.response.get("expires_in"))
+
+client = MyAppAPIClient(auth=TokenProviderAuth(fetch_token))
+```
+
+A provider that logs in through the same client it authenticates **must** keep the login call itself unauthenticated (e.g. `raw_options={"auth": None}` on that call, as shown above). Otherwise, the login call tries to authenticate using the token it is currently responsible for fetching, resulting in a `TokenError`
+
+
 # Sync vs Async
 
 The framework supports both `sync` and `async` execution **from the same endpoint definition**. The execution mode is determined by how your API client is instantiated.
@@ -899,7 +932,7 @@ The object returned by every endpoint call. Key attributes:
 class Kwargs(TypedDict, total=False):
     quiet: bool | None          # suppress request/response logs. None defers to the client's log_requests default
     with_hooks: bool            # set to False to skip pre/post hooks
-    raw_options: dict[str, Any] # raw httpx2 client options (timeout, headers, ...)
+    raw_options: dict[str, Any] # raw httpx2 client options (timeout, headers, auth, ...)
 ```
 
 Always include `**kwargs: Unpack[Kwargs]` in your endpoint function signatures so callers can use these options without triggering an "unexpected keyword argument" error:
