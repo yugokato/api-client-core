@@ -606,37 +606,6 @@ When both decorators and hooks are configured, the full request lifecycle runs i
 6. `request_wrapper` callable (after-call)
 7. Endpoint decorators (after-call)
 
-**Example — Automatically attach/detach a token after a successful login/logout:**
-
-```python
-from collections.abc import Callable
-from typing import Any
-
-from httpx2 import HTTPError
-
-from api_client_core import BaseAPI, Endpoint
-from api_client_core.types import RestResponse
-
-
-class MyAppBaseAPI(BaseAPI):
-    app_name = "my-app"
-
-    def post_request_hook(
-        self,
-        endpoint: Endpoint,
-        response: RestResponse | None,
-        exception: HTTPError | None,
-        *path_params: Any,
-        **params: Any,
-    ) -> None:
-        if response and response.ok:
-            if endpoint == self.api_client.auth.login.endpoint:
-                self.api_client.rest_client.token = response.response["token"]
-            elif endpoint == self.api_client.auth.logout.endpoint:
-                self.api_client.rest_client.auth = None
-```
-
-
 ## Endpoint Object (`Endpoint`)
 
 `Endpoint` is a frozen `dataclass` holding all metadata for a single endpoint. It is exposed on every endpoint function as `.endpoint` and to each API class via its `.endpoints` list.
