@@ -32,6 +32,7 @@ It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from 
 - [Command-Line Interface (CLI)](#command-line-interface-cli)
 - [Type and Response Reference](#type-and-response-reference)
 - [Extending Core](#extending-core)
+- [Development](#development)
 
 
 # Design Goals
@@ -50,7 +51,7 @@ pip install git+https://github.com/yugokato/api-client-core
 ```
 
 > [!NOTE]
-> This project and its upstream dependency `common-libs` are not currently versioned. To pick up upstream changes into your existing installation, add `--force-reinstall` to install the latest version.
+> This project and its upstream dependency `common-libs` are not currently versioned. To pick up upstream changes into your existing installation, add `--force-reinstall` to install the latest version. If you're working from a `uv`-managed checkout instead, use `uv lock --upgrade-package common-libs && uv sync`.
 
 
 # Quick Start
@@ -1154,3 +1155,16 @@ In addition to the features provided by API Client Core, it adds the following u
 - **API tags** — endpoint functions and API classes carry the OpenAPI `tags` metadata, mirroring how the spec organizes endpoints.
 
 See the [OpenAPI Test Client README](https://github.com/yugokato/openapi-test-client) for the full walkthrough.
+
+
+# Development
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Editing dependencies in
+`pyproject.toml` requires re-running `uv lock` and committing the updated `uv.lock`. CI rejects a stale lock.
+
+```bash
+uv sync --all-extras         # create .venv with all dev dependencies (incl. cli-completion, needed by tests_cli/)
+uv run pre-commit install    # install git hooks (keeps uv.lock in sync)
+uv run pytest tests -n auto  # run the test suite
+uv run tox                   # run the full test/lint matrix
+```
