@@ -25,10 +25,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed"
 ]
+dynamic = ["version"]
 dependencies = [
     "common-libs[rest-client,http3]@git+https://github.com/yugokato/common-libs",
 ]
-dynamic = ["version"]
 
 [project.scripts]
 api-client = "api_client_core.cli._entrypoint:main"
@@ -37,10 +37,31 @@ api-client = "api_client_core.cli._entrypoint:main"
 cli-completion = [
     "argcomplete>=3",
 ]
-dev = [
-    "common-libs[dev,test]",
-    "api-client-core[cli-completion]",
+
+[dependency-groups]
+lint = [
+    "mypy>=2.0.0,<3",
+    "pre-commit>=4.0.0,<5",
+    "ruff>=0.16.0,<0.17.0",
 ]
+test = [
+    "pytest>=9,<10",
+    "pytest-asyncio>=1.3.0",
+    "pytest-mock>=3.14.0",
+    "pytest-xdist[psutil]<4",
+]
+tox = [
+    "tox>=4.22.0,<5",
+    "tox-uv>=1.36.0,<2",
+]
+dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "tox"},
+]
+
+[tool.uv]
+required-version = ">=0.12.5"
 
 
 [tool.setuptools]
