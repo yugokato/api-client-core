@@ -265,7 +265,7 @@ Use `--help` on any leaf command for the exact wrapper options and syntax suppor
 Tab completion is powered by [argcomplete](https://github.com/kislyuk/argcomplete). To enable tab completion, first install the optional dependency:
 
 ```bash
-pip install api-client-core[cli-completion]
+pip install git+https://github.com/yugokato/api-client-core[cli-completion]
 ```
 
 Then add the following to your shell startup file (`~/.bashrc` or `~/.bash_profile` for bash, `~/.zshrc` for zsh):
