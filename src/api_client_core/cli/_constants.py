@@ -10,7 +10,6 @@ from __future__ import annotations
 from enum import StrEnum
 
 PROG = "api-client"
-LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 # Marker appended where a rendered value was elided to fit a width budget (a long choice group, a clamped
 # help= line under -h, ...)
 ELLIPSIS = "…"

@@ -12,14 +12,12 @@ from common_libs.ansi_colors import ColorCodes
 from common_libs.logging import get_logger
 
 from api_client_core import __version__
-from api_client_core.base import APIClient
-from api_client_core.endpoints import Endpoint
+from api_client_core._common.docstring import first_doc_line, split_param_docs
+from api_client_core.core.base import APIClient
+from api_client_core.core.endpoints import Endpoint
 
-from ._cache import is_completion_registered
-from ._completion_schema import AppSpec, CompletionTree, OptSpec, ResourceSpec
-from ._constants import HELP_FLAGS, LOG_LEVELS, OUTPUT_CHOICES, PROG, Flag, Output
-from ._paths import project_roots
-from .discovery import (
+from .._common.console import LOG_LEVELS
+from .._common.discovery import (
     DiscoveryResult,
     discover_clients,
     discover_clients_with_failures,
@@ -27,6 +25,10 @@ from .discovery import (
     endpoints_for,
     format_discovery_failures,
 )
+from .._common.paths import project_roots
+from ._cache import is_completion_registered
+from ._completion_schema import AppSpec, CompletionTree, OptSpec, ResourceSpec
+from ._constants import HELP_FLAGS, OUTPUT_CHOICES, PROG, Flag, Output
 from .params import (
     accepts_file_path,
     accepts_json_file,
@@ -35,7 +37,6 @@ from .params import (
     mark_accepts_file_indirection,
     read_file_text,
     read_stdin_text,
-    split_param_docs,
 )
 from .parser import ArgumentParser, HelpAction, default_metavar
 from .utils import box_text, color_output, get_terminal_width, indent_text
@@ -66,7 +67,7 @@ def build_initial_parser() -> argparse.ArgumentParser:
     parser.add_argument(Flag.VERSION, action="version", version=f"{PROG} {__version__}")
     subparsers = parser.add_subparsers(metavar="<app-name>", help="app_name set in your API client")
     for app_name, client_class in sorted(result.clients.items(), key=lambda item: _natural_sort_key(item[0])):
-        help_text = _first_doc_line(client_class.__doc__) or f"{client_class.__name__} commands"
+        help_text = first_doc_line(client_class.__doc__) or f"{client_class.__name__} commands"
         subparsers.add_parser(app_name, help=help_text)
     return parser
 
@@ -115,7 +116,7 @@ def build_client_parser(client_class: type[APIClient], *, prog: str | None = Non
             continue
         resource_parser = resource_subparsers.add_parser(
             resource_name,
-            help=_first_doc_line(api_class.__doc__) or f"{api_class.__name__} commands",
+            help=first_doc_line(api_class.__doc__) or f"{api_class.__name__} commands",
             description=_generate_description(api_class),
             tips=tips,
         )
@@ -560,18 +561,10 @@ def _command_help(endpoint: Endpoint[Any], doc: str | None) -> str:
     :param doc: The endpoint function's own docstring prose (its `:param` entries already split out by
                 `split_param_docs()`), if any
     """
-    summary = _first_doc_line(doc) or str(endpoint)
+    summary = first_doc_line(doc) or str(endpoint)
     if endpoint.is_deprecated:
         summary += color_output(" (deprecated)", color_code=ColorCodes.YELLOW)
     return summary
-
-
-def _first_doc_line(doc: str | None) -> str | None:
-    """Return the first non-blank line of a docstring, or `None` if it has none.
-
-    :param doc: Docstring to summarize
-    """
-    return doc.strip().splitlines()[0] if doc and doc.strip() else None
 
 
 def _serialize_client_parser(parser: argparse.ArgumentParser) -> AppSpec:

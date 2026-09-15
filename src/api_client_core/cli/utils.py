@@ -1,35 +1,12 @@
 from __future__ import annotations
 
-import sys
 from shutil import get_terminal_size
 from textwrap import wrap
 from typing import Any
 
-from common_libs.ansi_colors import ColorCodes, color
+from common_libs.ansi_colors import color
 
-from ._stdout import cli_output
-
-
-def write_error(err: BaseException | str) -> None:
-    """Write a red `error: <err>` line to stderr.
-
-    A `LookupError`/`RuntimeError` - the two types this package's own CLI code raises for an expected, already
-    self-descriptive usage failure (e.g. an unknown app name, or a client exposing no usable commands) - is shown as
-    its bare message, since the class name adds no information a plain English sentence doesn't already convey. Any
-    other exception type keeps its class name prefixed, since a terser message (e.g. a bare `KeyError`'s own
-    quote-only `str()`) benefits from the added context of knowing what actually went wrong.
-
-    :param err: The error message, or the exception being reported
-    """
-    if isinstance(err, LookupError | RuntimeError):
-        message = str(err)
-    elif isinstance(err, BaseException):
-        message = f"{type(err).__name__}: {err}"
-    else:
-        message = err
-    with cli_output(sys.stderr):
-        error_line = color(f"error: {message}\n", color_code=ColorCodes.RED)
-    sys.stderr.write(error_line)
+from .._common.console import output_to
 
 
 def color_output(text: Any, **kwargs: Any) -> str:
@@ -42,7 +19,7 @@ def color_output(text: Any, **kwargs: Any) -> str:
     :param text: The text to colorize
     :param kwargs: Keyword arguments forwarded to `color()`
     """
-    with cli_output():
+    with output_to():
         return color(text, **kwargs)
 
 

@@ -16,11 +16,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from .._common.console import reserve_stdout
+from .._common.paths import find_project_root, project_roots
 from ._cache import cache_key, load_cache, mark_completion_registered, save_cache
 from ._completion_schema import CompletionTree, OptSpec
 from ._constants import PROG, Flag
-from ._paths import find_project_root, project_roots
-from ._stdout import reserve_stdout
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -49,7 +49,7 @@ jobs:
             uv.lock
       - name: Install dependencies
         run: |
-          uv sync --locked --extra cli-completion --no-default-groups --group lint
+          uv sync --locked --all-extras --no-default-groups --group lint
       - name: Run pre-commit
         shell: bash
         run: |
@@ -79,7 +79,7 @@ jobs:
             uv.lock
       - name: Install dependencies
         run: |
-          uv sync --locked --extra cli-completion --no-default-groups --group test
+          uv sync --locked --all-extras --no-default-groups --group test
       - name: Run pytest
         run: |
           uv run --no-sync pytest tests -n auto

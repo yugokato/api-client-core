@@ -20,13 +20,15 @@ from common_libs.ansi_colors import ColorCodes
 from common_libs.logging import get_logger
 from common_libs.utils import dedup
 
-from api_client_core.endpoints import Endpoint
-from api_client_core.endpoints.utils import endpoint_call as endpoint_call_util
-from api_client_core.endpoints.utils import param_type as param_type_util
-from api_client_core.endpoints.utils.endpoint_model import get_reserved_param_names
-from api_client_core.types import Alias, File, Unset
+from api_client_core._common.docstring import split_param_docs
+from api_client_core.core.endpoints import Endpoint
+from api_client_core.core.endpoints.utils import endpoint_call as endpoint_call_util
+from api_client_core.core.endpoints.utils import param_type as param_type_util
+from api_client_core.core.endpoints.utils.endpoint_model import get_reserved_param_names, resolve_signature_name
+from api_client_core.core.types import File, Unset
 
-from ._constants import ELLIPSIS, LOG_LEVELS, NOT_PROVIDED, RESERVED_CLI_FLAGS, WRAPPER_CHAIN_DEST, Flag
+from .._common.console import LOG_LEVELS
+from ._constants import ELLIPSIS, NOT_PROVIDED, RESERVED_CLI_FLAGS, WRAPPER_CHAIN_DEST, Flag
 from .parser import ArgumentParser, set_full_metavar
 from .utils import color_output
 
@@ -49,9 +51,6 @@ _LIST_TYPE_SUFFIX = "[]"
 # The two `nargs` spellings a repeatable flag can carry: "*" as originally built, "+" once a required list is
 # upgraded to reject zero values (see the required-param branch below).
 _REPEATABLE_NARGS = ("*", "+")
-# Matches one `:param <name>: <description>` docstring line, a common reST/Sphinx convention, once the
-# line's own leading indentation has been stripped.
-_PARAM_DOC_RE = re.compile(r"^:param\s+(\S+):\s*(.*)$")
 
 
 class _TypeName(StrEnum):
@@ -67,15 +66,6 @@ _SCALAR_TYPES = (str, int, float)  # each type's own `__name__` is the CLI value
 # Types with no unambiguous CLI-token parser but an unambiguous plain-string wire form, sent as-is rather than falling
 # back to JSON. A str subclass is handled separately, since it can't be listed here by identity.
 _STRINGLY_TYPES = (datetime, date, time, UUID, Decimal)
-# Container origins treated as a homogeneous, repeatable collection of one element type (nargs="*" on the CLI). A
-# variable-length tuple[X, ...] is checked separately, since bare `tuple` also covers a fixed-length, heterogeneous
-# tuple like tuple[str, int], which isn't this shape.
-_SEQUENCE_ORIGINS = (list, set, frozenset, Sequence)
-# Same collections, unparameterized (e.g. bare `list` rather than `list[X]`). get_origin() returns None for
-# these, so they need their own identity check rather than joining _SEQUENCE_ORIGINS. Includes bare `tuple`,
-# which _SEQUENCE_ORIGINS excludes since a *subscripted* tuple may be fixed-length and heterogeneous - a bare
-# `tuple` carries no such shape and is unambiguously repeatable.
-_BARE_SEQUENCE_TYPES = (*_SEQUENCE_ORIGINS, tuple)
 _MAX_CHOICE_GROUP_WIDTH = 30  # width of a rendered "{a,b,c}" Literal/Enum choice group before it elides to ELLIPSIS
 # Width of a union's own "a|b|c" combined type-column name before it elides. Wider than _MAX_CHOICE_GROUP_WIDTH since a
 # union combines multiple members rather than one group's own choices, and reusing the same cap would elide an ordinary,
@@ -188,7 +178,7 @@ def add_endpoint_arguments(parser: argparse.ArgumentParser, endpoint: Endpoint[A
                 f"{endpoint.api_class.__name__}.{endpoint.func_name}: Failed to build help text for parameter "
                 f"{param_name!r}: {type(e).__name__}: {e}"
             )
-            arg_kwargs["help"] = f"[{_param_location(endpoint, field)}]"
+            arg_kwargs["help"] = f"[{endpoint_call_util.get_param_location(endpoint, field)}]"
         if arg_kwargs.get("nargs") in _REPEATABLE_NARGS and "metavar" not in arg_kwargs:
             # Names the single value each repetition takes, rather than argparse's own dest-derived metavar,
             # which is usually the parameter's own plural name (e.g. "products") and reads as if the whole
@@ -245,38 +235,6 @@ def collect_call_kwargs(endpoint: Endpoint[Any], namespace: argparse.Namespace) 
             value = [_to_file(v) if isinstance(v, Path) else v for v in value]
         call_kwargs[param_name] = value
     return call_kwargs
-
-
-def normalize_call_args(
-    func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    """Move keyword values that target positional-only parameters into the positional arguments.
-
-    :param func: Original API function
-    :param args: Positional arguments from the endpoint call
-    :param kwargs: Keyword arguments from the endpoint call
-    """
-    sig = endpoint_call_util.get_params_signature(func)
-    positional_only = [p for p in sig.parameters.values() if p.kind is inspect.Parameter.POSITIONAL_ONLY]
-    unfilled = positional_only[len(args) :]
-    last_named = max((i for i, p in enumerate(unfilled) if p.name in kwargs), default=-1)
-    if last_named < 0:
-        return args, kwargs
-
-    new_args = list(args)
-    kwargs = dict(kwargs)
-    for param in unfilled[: last_named + 1]:
-        if param.name in kwargs:
-            new_args.append(kwargs.pop(param.name))
-        elif param.default is inspect.Parameter.empty:
-            raise TypeError(
-                f"{func.__name__}() cannot accept {unfilled[last_named].name!r} as a keyword argument without a "
-                f"value for the preceding positional-only parameter {param.name!r}. Give {param.name!r} a value, "
-                f"or pass the positional-only parameters positionally."
-            )
-        else:
-            new_args.append(param.default)
-    return tuple(new_args), kwargs
 
 
 def peek_log_level(argv: list[str]) -> str | None:
@@ -385,7 +343,7 @@ def _resolve_params(
     seen_flags: set[str] = set()
     seen_dests: set[str] = set()
     for name, field in endpoint.model.__dataclass_fields__.items():
-        param_name = _resolve_signature_name(name, field.type, sig)
+        param_name = resolve_signature_name(name, field.type, sig)
         flag = _flag_for(param_name)
         try:
             spec = _arg_spec(field.type, flag)
@@ -474,29 +432,6 @@ def _next_free_alias(
     return None
 
 
-def _resolve_signature_name(field_name: str, field_type: Any, sig: inspect.Signature) -> str:
-    """Resolve a model field back to the original signature parameter name it was derived from.
-
-    A model field is renamed away from its signature name when it collides with a reserved name or a path
-    parameter of the same name, in which case its `Alias` metadata holds the original name. Driving the CLI
-    flag and endpoint call by the renamed name would either miss the target parameter entirely or have its
-    value silently absorbed into `**kwargs`.
-
-    :param field_name: Model field name
-    :param field_type: Model field's resolved type annotation
-    :param sig: Original endpoint function's signature
-    """
-    if field_name in sig.parameters:
-        return field_name
-    annotated = param_type_util.get_annotated_type(field_type, metadata_filter=Alias)
-    candidates = annotated if isinstance(annotated, list | tuple) else ([annotated] if annotated else [])
-    for candidate in candidates:
-        for meta in candidate.__metadata__:
-            if isinstance(meta, Alias) and meta.value in sig.parameters:
-                return meta.value
-    return field_name
-
-
 def _flag_for(param_name: str) -> str:
     """Derive a parameter's CLI flag from its original signature name.
 
@@ -544,7 +479,7 @@ def _arg_spec(annotation: Any, flag: str) -> _ArgSpec:
         if union_spec is not None:
             return _ArgSpec({"type": union_spec.converter}, union_spec.value_type, union_spec.accepts_file_path)
         return _ArgSpec({"type": _parse_json}, _TypeName.JSON)
-    elem_type = _sequence_elem_type(base)
+    elem_type = param_type_util.get_sequence_elem_type(base)
     if elem_type is not None:
         # Recurses through the same single-token mapping a scalar of this type would use, so e.g.
         # list[SomeEnum]/list[Literal[...]] keep their own choices validation instead of degrading to str, and
@@ -702,11 +637,13 @@ def _scalar_or_list_spec(members: tuple[Any, ...]) -> _ArgSpec | None:
 
     :param members: Union members, with `NoneType` already excluded
     """
-    list_indices = [i for i, m in enumerate(members) if _sequence_elem_type(_effective_type(m)) is not None]
+    list_indices = [
+        i for i, m in enumerate(members) if param_type_util.get_sequence_elem_type(_effective_type(m)) is not None
+    ]
     if len(list_indices) != 1:
         return None
     (list_index,) = list_indices
-    elem_type = _sequence_elem_type(_effective_type(members[list_index]))
+    elem_type = param_type_util.get_sequence_elem_type(_effective_type(members[list_index]))
     scalar_members = tuple(m for i, m in enumerate(members) if i != list_index)
     if not scalar_members:
         return None
@@ -899,32 +836,6 @@ def _effective_type(annotation: Any) -> Any:
         if len(non_none) == 1:
             return _effective_type(non_none[0])
     return annotation
-
-
-def _sequence_elem_type(base: Any) -> Any | None:
-    """Return the declared element type `X` for a homogeneous, repeatable-collection annotation - `list[X]`,
-    `tuple[X, ...]`, `set[X]`, `frozenset[X]`, or `collections.abc.Sequence[X]` - or `None` for anything else,
-    including a fixed-length, heterogeneous tuple (e.g. `tuple[str, int]`), which has no single element type.
-
-    An unparameterized collection (bare `list`, `tuple`, `set`, `frozenset`, or `Sequence`) is repeatable
-    too, but declares no element type: it returns `inspect.Parameter.empty`, the same sentinel `_arg_spec()`
-    already uses for "no type was declared here", so the caller falls back to a JSON-or-string element parse
-    rather than either a scalar `str` guess or a single JSON-document flag.
-
-    :param base: Already-unwrapped annotation to inspect
-    """
-    origin = get_origin(base)
-    if origin in _SEQUENCE_ORIGINS:
-        (elem_type,) = get_args(base) or (inspect.Parameter.empty,)
-        return elem_type
-    if origin is tuple:
-        args = get_args(base)
-        if len(args) == 2 and args[1] is Ellipsis:
-            return args[0]
-        return None
-    if base in _BARE_SEQUENCE_TYPES:
-        return inspect.Parameter.empty
-    return None
 
 
 def _enum_converter(cls: type[Enum]) -> Callable[[str], Enum]:
@@ -1225,67 +1136,6 @@ def mark_accepts_file_indirection(action: argparse.Action) -> None:
     setattr(action, _ACCEPTS_JSON_FILE_ATTR, True)
 
 
-def split_param_docs(doc: str | None) -> tuple[str, dict[str, str]]:
-    """Split an endpoint function's own docstring into its prose (everything but `:param` entries) and a
-    `dict` of `:param <name>: <description>` entries keyed by parameter name.
-
-    A description that continues onto the following non-blank line(s) not themselves starting a new
-    `:field:` - this project's own convention for one too long to fit a single line - is joined back into
-    one line. Runs of source lines that belong to no `:param` entry accumulate into the prose, in the order
-    they appear, with consecutive blank lines collapsed to one so a `:param` block's own removal never
-    leaves a stray gap behind. `cleandoc()` normalizes indentation first, so this works the same regardless
-    of how deep the enclosing function body sits and matches Python's own C-level docstring cleanup (3.13+)
-    on every supported version.
-
-    :param doc: The endpoint function's own docstring, if any
-    """
-    if not doc or not doc.strip():
-        return "", {}
-    params: dict[str, list[str]] = {}
-    prose: list[str] = []
-    current: str | None = None
-    for line in inspect.cleandoc(doc).splitlines():
-        match = _PARAM_DOC_RE.match(line.strip())
-        if match:
-            name, text = match.groups()
-            current = name
-            params[current] = [text] if text else []
-            continue
-        if current is not None:
-            stripped = line.strip()
-            if stripped and not stripped.startswith(":"):
-                params[current].append(stripped)
-                continue
-            current = None
-            if not stripped:
-                continue
-        if line.strip() or (prose and prose[-1].strip()):
-            prose.append(line)
-    while prose and not prose[-1].strip():
-        prose.pop()
-    return "\n".join(prose), {name: " ".join(parts) for name, parts in params.items()}
-
-
-def _param_location(endpoint: Endpoint[Any], field: Field[Any]) -> str:
-    """Return the request location marker (`path`/`query`/`body`) for one endpoint parameter field.
-
-    Kept separate so a bare `[location]` marker can still be shown if the rest of that parameter's help text
-    fails to render, without losing the parameter's flag entirely.
-
-    :param endpoint: Endpoint object
-    :param field: Dataclass field describing the parameter
-    """
-    if field.metadata.get("path") is True:
-        return "path"
-    if (
-        endpoint.method == "get"
-        or endpoint.model.endpoint_func._use_query_string
-        or param_type_util.is_query_param(field.type)
-    ):
-        return "query"
-    return "body"
-
-
 def _help_text(
     endpoint: Endpoint[Any],
     field: Field[Any],
@@ -1313,7 +1163,7 @@ def _help_text(
                         full under `--help`, clamped to that one line under `-h`, or `None` if the
                         docstring documents no such parameter
     """
-    location = _param_location(endpoint, field)
+    location = endpoint_call_util.get_param_location(endpoint, field)
     columns = _help_column(f"[{location}]", _LOCATION_COLUMN_WIDTH)
     if type_width:
         columns += _help_column(spec.display_type or "", type_width + 1, color_code=ColorCodes.DARK_GREY)

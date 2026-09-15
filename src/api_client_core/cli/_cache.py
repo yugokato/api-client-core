@@ -14,8 +14,8 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from .._common.paths import find_project_root, is_own_package_dir, is_skipped_dir, is_venv_dir
 from ._completion_schema import CompletionTree
-from ._paths import find_project_root, is_own_package_dir, is_skipped_dir, is_venv_dir
 
 _STALE_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 _PRUNE_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
@@ -116,8 +116,9 @@ def _cli_package_signature() -> str:
 
     Mixed into the completion cache key so an upgrade or edit of the framework itself invalidates a cache
     built under the previous code, without waiting for a project source file to change. Covers the whole
-    package, not just `cli/`, since a change to e.g. `endpoints/utils/param_type.py` or `endpoint_model.py`
-    changes how a parameter maps to a CLI flag just as directly as a change to `cli/params.py` itself would.
+    package, not just `cli/`, since a change to e.g. `core/endpoints/utils/param_type.py` or
+    `endpoint_model.py` changes how a parameter maps to a CLI flag just as directly as a change to
+    `cli/params.py` itself would.
     """
     hasher = hashlib.sha256()
     package_root = Path(__file__).parent.parent

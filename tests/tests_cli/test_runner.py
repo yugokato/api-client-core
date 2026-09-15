@@ -15,10 +15,10 @@ from pytest import CaptureFixture
 from pytest_mock import MockerFixture
 
 from api_client_core import APIClient
-from api_client_core.cli._stdout import cli_stdout, reserve_stdout
+from api_client_core._common.console import real_stdout, reserve_stdout
 from api_client_core.cli.builder import build_client_parser
 from api_client_core.cli.runner import _request_line, run
-from api_client_core.endpoints.endpoint import Endpoint
+from api_client_core.core.endpoints.endpoint import Endpoint
 
 from .conftest import CliTestClient, CollisionClient, PositionalOnlyClient, make_httpx_response, make_rest_response
 
@@ -605,7 +605,7 @@ class TestStdoutGuard:
         tty-ness instead.
 
         `sys.stdout` and `sys.stderr` are the very same object while the reservation is active, so the two
-        streams patched here are `sys.stderr` and `cli_stdout()` (the real stdout, patched before the
+        streams patched here are `sys.stderr` and `real_stdout()` (the real stdout, patched before the
         reservation is opened, since it's the same object either way), not `sys.stdout` itself. Patched
         directly on the objects `capsys` installs, rather than relying on `common_libs`' autouse tty
         fixture, which only patches the streams that exist before `capsys` installs its own.
@@ -615,7 +615,7 @@ class TestStdoutGuard:
         against stderr's tty-ness rather than only the line `error()` composes directly
         """
         monkeypatch.setattr(sys.stderr, "isatty", lambda: True, raising=False)
-        monkeypatch.setattr(cli_stdout(), "isatty", lambda: False, raising=False)
+        monkeypatch.setattr(real_stdout(), "isatty", lambda: False, raising=False)
 
         with reserve_stdout(), pytest.raises(SystemExit) as exc_info:
             run(CliTestClient, ["widgets", "get-widget", "--help"], rest_client=RestClient("https://example.com/api"))

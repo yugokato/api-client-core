@@ -32,10 +32,14 @@ dependencies = [
 
 [project.scripts]
 api-client = "api_client_core.cli._entrypoint:main"
+api-client-mcp = "api_client_core.mcp._entrypoint:main"
 
 [project.optional-dependencies]
 cli-completion = [
     "argcomplete>=3",
+]
+mcp = [
+    "mcp>=2.1,<3",
 ]
 
 [dependency-groups]
@@ -68,9 +72,10 @@ required-version = ">=0.12.5"
 # False so package-data below is the sole, exact source of truth for what ships as package data. True would
 # additionally auto-include every git-tracked file under a package directory (via setuptools_scm's own
 # MANIFEST-equivalent file-finder), regardless of package-data - which is what used to sweep
-# cli/README.md into the wheel/sdist even after removing it from package-data below. That file is written
-# entirely in repo-relative links (e.g. ../../../README.md), correct only when rendered on GitHub, so
-# shipping it as installed package data just means those links resolve to nothing.
+# cli/README.md (and, for the same reason, mcp/README.md) into the wheel/sdist even after removing it from
+# package-data below. Both files are written entirely in repo-relative links (e.g. ../../../README.md),
+# correct only when rendered on GitHub, so shipping either as installed package data just means those links
+# resolve to nothing.
 include-package-data = false
 package-dir = {"" = "src"}
 

@@ -15,19 +15,17 @@ from common_libs.clients.rest_client.utils import (
 )
 from httpx2 import HTTPStatusError, Response
 
-from api_client_core.base import APIClient
-from api_client_core.endpoints import Endpoint
+from api_client_core.core.base import APIClient
+from api_client_core.core.endpoints import Endpoint
+from api_client_core.core.endpoints.utils.endpoint_call import normalize_call_args
+from api_client_core.core.types import RestResponse
 from api_client_core.logging import setup_logging
-from api_client_core.types import RestResponse
 
+from .._common.console import STDERR_LOGGING_DELTA_CONFIG, real_stdout, write_error
 from ._constants import Output
-from ._stdout import cli_stdout
 from .builder import build_client_parser
-from .params import collect_call_kwargs, normalize_call_args, reset_stdin_state
-from .utils import write_error
+from .params import collect_call_kwargs, reset_stdin_state
 from .wrappers import any_wrapper_given, apply_wrappers, expected_statuses
-
-STDERR_LOGGING_DELTA_CONFIG = {"handlers": {"console": {"stream": "ext://sys.stderr"}}}
 
 
 def run(
@@ -215,7 +213,7 @@ def _write_output(result: RestResponse | list[Any], output: str) -> None:
     response headers, and decoded body in one `{status_code, headers, body}` object, or an array of them.
     `raw` writes each item's own undecoded response body, as text, exactly as the server sent it - for a
     list result, each item's own raw body is written on its own line, best-effort, since concatenating
-    arbitrary raw bodies has no single correct separator. Written via `cli_stdout()` so it lands on the real
+    arbitrary raw bodies has no single correct separator. Written via `real_stdout()` so it lands on the real
     stdout even while the process reservation points `sys.stdout` at stderr.
 
     :param result: The value returned by the dispatched endpoint call
@@ -225,11 +223,11 @@ def _write_output(result: RestResponse | list[Any], output: str) -> None:
         return
     if output == Output.RAW:
         items = result if isinstance(result, list) else [result]
-        print("\n".join(_raw_payload(item) for item in items), file=cli_stdout())
+        print("\n".join(_raw_payload(item) for item in items), file=real_stdout())
         return
     payload_func = _full_payload if output == Output.FULL else _response_payload
     payload = [payload_func(item) for item in result] if isinstance(result, list) else payload_func(result)
-    print(json.dumps(payload, default=str), file=cli_stdout())
+    print(json.dumps(payload, default=str), file=real_stdout())
 
 
 def _response_payload(item: RestResponse | BaseException) -> Any:

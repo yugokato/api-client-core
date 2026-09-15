@@ -5,13 +5,12 @@ import sys
 from api_client_core import __version__
 from api_client_core.logging import setup_logging
 
+from .._common.console import STDERR_LOGGING_DELTA_CONFIG, real_stdout, write_error
+from .._common.discovery import ensure_project_on_sys_path, find_client
 from ._constants import HELP_FLAGS, PROG, Flag
-from ._stdout import cli_stdout
 from .builder import build_initial_parser
-from .discovery import ensure_project_on_sys_path, find_client
 from .params import peek_log_level
-from .runner import STDERR_LOGGING_DELTA_CONFIG, run
-from .utils import write_error
+from .runner import run
 
 _GLOBAL_VALUE_FLAGS = (Flag.BASE_URL, Flag.LOG_LEVEL)
 
@@ -49,7 +48,7 @@ def dispatch(argv: list[str] | None = None) -> int:
     if arg0 == Flag.VERSION:
         # Skips bootstrap and discovery: a version check shouldn't pay the latency of importing every project module
         # just to print a version string.
-        print(f"{PROG} {__version__}", file=cli_stdout())
+        print(f"{PROG} {__version__}", file=real_stdout())
         return 0
 
     app_name, rest, leading_flag = _peek_app_name(argv)
@@ -59,7 +58,7 @@ def dispatch(argv: list[str] | None = None) -> int:
             build_initial_parser().print_help()
             return 0
         if leading_flag == Flag.VERSION:
-            print(f"{PROG} {__version__}", file=cli_stdout())
+            print(f"{PROG} {__version__}", file=real_stdout())
             return 0
         _bootstrap(log_level)
         parser = build_initial_parser()
