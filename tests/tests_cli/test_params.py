@@ -4,7 +4,6 @@ import argparse
 import inspect
 import io
 import sys
-import typing
 from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
@@ -34,14 +33,11 @@ from api_client_core.cli.params import (
     _format_default,
     _parse_json,
     _parse_json_or_str,
-    _sequence_elem_type,
     accepts_file_path,
     accepts_json_file,
     add_endpoint_arguments,
     collect_call_kwargs,
-    normalize_call_args,
     peek_log_level,
-    split_param_docs,
 )
 from api_client_core.cli.parser import ArgumentParser, full_metavar
 from api_client_core.types import Alias, File, Kwargs, Query, RestResponse, Unset
@@ -1557,109 +1553,6 @@ def documented_params_api_class() -> type[BaseAPI]:
     return DocumentedParamsAPI
 
 
-class TestSplitParamDocs:
-    """Tests for `split_param_docs()`, which splits an endpoint function's own docstring into its prose
-    (everything but `:param` entries) and a dict of `:param <name>: <description>` entries.
-    """
-
-    def test_returns_empty_prose_and_dict_for_no_docstring(self) -> None:
-        """Test that a missing docstring splits to an empty prose string and an empty dict, rather than
-        raising
-        """
-        assert split_param_docs(None) == ("", {})
-
-    def test_returns_empty_prose_and_dict_for_a_blank_docstring(self) -> None:
-        """Test that a whitespace-only docstring splits the same as a missing one, rather than boxing a
-        dangling title with nothing under it
-        """
-        assert split_param_docs("   \n  ") == ("", {})
-
-    def test_a_docstring_with_no_param_entries_is_all_prose(self) -> None:
-        """Test that a docstring with a summary but no `:param` lines splits to that summary as prose and
-        an empty dict
-        """
-        assert split_param_docs("Just a summary, no params documented.") == (
-            "Just a summary, no params documented.",
-            {},
-        )
-
-    def test_parses_a_single_line_entry(self) -> None:
-        """Test that one `:param name: description` line parses to `{"name": "description"}`, and the
-        summary above it is returned as prose
-        """
-        doc = "Summary.\n\n:param name: The thing's own display name\n"
-        assert split_param_docs(doc) == ("Summary.", {"name": "The thing's own display name"})
-
-    def test_a_docstring_with_only_param_entries_has_no_prose(self) -> None:
-        """Test that a docstring documenting only parameters, with no summary or other prose, splits to an
-        empty prose string rather than a dangling blank line
-        """
-        assert split_param_docs(":param name: The thing's own display name\n") == (
-            "",
-            {"name": "The thing's own display name"},
-        )
-
-    def test_joins_a_continuation_line_with_a_single_space(self) -> None:
-        """Test that a description wrapped onto an indented continuation line is joined back into one
-        line with a single space, matching this project's own multi-line `:param` convention
-        """
-        doc = (
-            "Summary.\n\n"
-            ":param note: An optional free-form note attached to the thing, wrapped here onto a\n"
-            "            second line\n"
-        )
-        assert split_param_docs(doc) == (
-            "Summary.",
-            {"note": "An optional free-form note attached to the thing, wrapped here onto a second line"},
-        )
-
-    def test_joins_an_unindented_continuation_line_too(self) -> None:
-        """Test that a continuation line is joined into its entry's description even when it carries no
-        indentation of its own, matching `:param` parsing's own indentation-agnostic rule
-        """
-        doc = "Summary.\n\n:param note: A note that\ncontinues here, unindented\n"
-        assert split_param_docs(doc) == ("Summary.", {"note": "A note that continues here, unindented"})
-
-    def test_a_blank_line_ends_the_current_entry_without_leaving_it_in_prose(self) -> None:
-        """Test that a blank line after a `:param` entry ends it and is itself consumed, so a following
-        paragraph (e.g. a docstring's closing prose) isn't absorbed as more of its description, and the
-        entry's own closing blank line doesn't leave a stray gap in the returned prose
-        """
-        doc = "Summary.\n\n:param name: A name\n\nSome trailing prose, unrelated to any parameter.\n"
-        assert split_param_docs(doc) == (
-            "Summary.\n\nSome trailing prose, unrelated to any parameter.",
-            {"name": "A name"},
-        )
-
-    def test_multiple_blank_lines_after_an_entry_collapse_to_one_in_prose(self) -> None:
-        """Test that several consecutive blank lines following a `:param` entry - one consumed by the
-        entry itself, the rest genuinely part of the docstring's own prose - still collapse to a single
-        blank line in the returned prose, rather than stacking one blank line per source line
-        """
-        doc = "Summary.\n\n:param name: A name\n\n\n\nFar trailing prose.\n"
-        assert split_param_docs(doc) == ("Summary.\n\nFar trailing prose.", {"name": "A name"})
-
-    def test_a_following_field_marker_ends_the_current_entry_and_is_kept_as_prose(self) -> None:
-        """Test that a following `:field:` marker (e.g. a second `:param`) ends the current entry rather
-        than being absorbed as a continuation line of it, and that a marker this module doesn't recognize
-        (e.g. `:return:`) is kept as prose instead of being silently dropped
-        """
-        doc = "Summary.\n\n:param a: First\n:param b: Second\n"
-        assert split_param_docs(doc) == ("Summary.", {"a": "First", "b": "Second"})
-
-        doc_with_return = "Summary.\n\n:param a: First\n:return: something\n"
-        assert split_param_docs(doc_with_return) == ("Summary.\n\n:return: something", {"a": "First"})
-
-    def test_normalizes_indentation_the_same_as_a_313_plus_compiled_docstring(self) -> None:
-        """Test that a docstring carrying its raw source indentation (as every docstring does on Python
-        versions before 3.13, which only strips it at compile time from there on) is normalized the same
-        way on every supported version, so a continuation line's relative indentation is read correctly
-        regardless of how deep the enclosing function body sits
-        """
-        doc = "Make a thing\n\n        :param name: A name that\n            continues here\n        "
-        assert split_param_docs(doc) == ("Make a thing", {"name": "A name that continues here"})
-
-
 class TestParamDescriptionInHelp:
     """Tests for `_help_text()`'s use of `split_param_docs()`: a parameter documented with its own
     `:param <name>: ...` docstring line shows that description on its own line beneath the existing
@@ -1901,30 +1794,6 @@ class TestArgSpec:
         )
         assert spec.value_type is None or has_converter
         assert spec.kwargs.get("action") is not argparse.BooleanOptionalAction or spec.value_type is None
-
-
-class TestSequenceElemType:
-    """Unit tests for `_sequence_elem_type()`'s bare-collection detection: an unparameterized `list`/
-    `tuple`/`set`/`frozenset`/`Sequence` is still repeatable and declares no element type at all
-    (`inspect.Parameter.empty`, the same "no type declared" sentinel `_arg_spec()` uses elsewhere), while a
-    fixed-length heterogeneous `tuple[str, int]`, a `dict`, and a plain `str` are not sequences at all
-    """
-
-    @pytest.mark.parametrize("annotation", [list, tuple, set, frozenset, Sequence, typing.Sequence])
-    def test_an_unparameterized_collection_declares_no_element_type(self, annotation: Any) -> None:
-        """Test that a bare, unparameterized collection annotation - `collections.abc.Sequence` and
-        `typing.Sequence` alike, which `get_origin()` resolves differently from one another when bare -
-        returns the "no type declared" sentinel rather than `None`, so the caller still treats it as
-        repeatable
-        """
-        assert _sequence_elem_type(annotation) is inspect.Parameter.empty
-
-    @pytest.mark.parametrize("annotation", [tuple[str, int], dict, str])
-    def test_a_non_sequence_shape_returns_none(self, annotation: Any) -> None:
-        """Test that a fixed-length heterogeneous tuple, a `dict`, and a plain `str` return `None`, unlike
-        an unparameterized collection
-        """
-        assert _sequence_elem_type(annotation) is None
 
 
 class TestScalarUnionConverter:
@@ -3435,113 +3304,6 @@ class TestFlagFor:
         escape (`from_`) still maps to its expected flag
         """
         assert _flag_for(param_name) == flag
-
-
-class TestNormalizeCallArgs:
-    """Tests for `normalize_call_args()`
-
-    This utility exists solely for the CLI's own dispatch (`runner.py`), which can only ever produce
-    keyword arguments. It must never be wired into the framework's own call-binding path (`split_params()`,
-    `EndpointFunc`), which deliberately keeps enforcing positional-only-ness for every direct Python call.
-    """
-
-    def test_no_positional_only_params_returns_input_unchanged(self) -> None:
-        """Test that a function with no positional-only params returns args/kwargs unchanged"""
-
-        def _func(self: Any, a: str, b: str) -> None: ...
-
-        args, kwargs = normalize_call_args(_func, (), {"a": "1", "b": "2"})
-        assert (args, kwargs) == ((), {"a": "1", "b": "2"})
-
-    def test_positional_only_param_already_given_positionally_returns_unchanged(self) -> None:
-        """Test that a positional-only param already supplied positionally is left untouched"""
-
-        def _func(self: Any, a: str, /, b: str) -> None: ...
-
-        args, kwargs = normalize_call_args(_func, ("1",), {"b": "2"})
-        assert (args, kwargs) == (("1",), {"b": "2"})
-
-    def test_required_positional_only_param_by_keyword_moves_into_args(self) -> None:
-        """Test that a required positional-only param passed by keyword is moved into the positional args"""
-
-        def _func(self: Any, a: str, /, b: str = "B") -> None: ...
-
-        args, kwargs = normalize_call_args(_func, (), {"a": "7"})
-        assert (args, kwargs) == (("7",), {})
-
-    def test_gap_before_named_param_is_filled_from_its_own_default(self) -> None:
-        """Test that an earlier positional-only param the caller skipped is filled from its own default,
-        the same value a direct positional call omitting it would bind
-        """
-
-        def _func(self: Any, a: int = 1, b: int = 2, /) -> None: ...
-
-        args, kwargs = normalize_call_args(_func, (), {"b": 5})
-        assert (args, kwargs) == ((1, 5), {})
-
-    def test_gap_with_no_default_raises_naming_both_params(self) -> None:
-        """Test that a skipped positional-only param with no default raises, naming both the unfillable param and
-        the later one the caller tried to reach by keyword
-        """
-
-        def _func(self: Any, a: str, b: str, /) -> None: ...
-
-        with pytest.raises(TypeError, match=r"_func\(\).*'b'.*'a'"):
-            normalize_call_args(_func, (), {"b": "5"})
-
-    def test_param_passed_positionally_and_by_name_with_var_keyword_returns_unchanged(self) -> None:
-        """Test that a positional-only param given both positionally and by name is left for Python's own
-        VAR_KEYWORD absorption, since it is already fully satisfied positionally
-        """
-
-        def _func(self: Any, a: int = 1, /, **kwargs: Any) -> None: ...
-
-        args, kwargs = normalize_call_args(_func, (1,), {"a": 9})
-        assert (args, kwargs) == ((1,), {"a": 9})
-
-    def test_param_passed_positionally_and_by_name_without_var_keyword_returns_unchanged(self) -> None:
-        """Test that a positional-only param given both positionally and by name with no VAR_KEYWORD is left
-        unchanged, so the natural 'multiple values' TypeError still surfaces downstream
-        """
-
-        def _func(self: Any, a: str, /, b: str = "B") -> None: ...
-
-        args, kwargs = normalize_call_args(_func, ("1",), {"a": "9"})
-        assert (args, kwargs) == (("1",), {"a": "9"})
-
-    def test_var_positional_param_is_untouched(self) -> None:
-        """Test that a VAR_POSITIONAL parameter coexisting with positional-only params is left alone"""
-
-        def _func(self: Any, a: str, /, *rest: Any, b: str = "B") -> None: ...
-
-        args, kwargs = normalize_call_args(_func, (), {"a": "1", "b": "5"})
-        assert (args, kwargs) == (("1",), {"b": "5"})
-
-    def test_unset_default_is_treated_as_a_normal_default_for_gap_filling(self) -> None:
-        """Test that a positional-only param defaulting to `Unset` is filled like any other default"""
-
-        def _func(self: Any, a: Any = Unset, b: int = 2, /) -> None: ...
-
-        args, kwargs = normalize_call_args(_func, (), {"b": 5})
-        assert (args, kwargs) == ((Unset, 5), {})
-
-    def test_does_not_mutate_the_caller_supplied_kwargs_dict(self) -> None:
-        """Test that normalization operates on a copy and never mutates the caller's kwargs dict"""
-
-        def _func(self: Any, a: str, /, b: str = "B") -> None: ...
-
-        original_kwargs = {"a": "7"}
-        normalize_call_args(_func, (), original_kwargs)
-        assert original_kwargs == {"a": "7"}
-
-    def test_is_idempotent(self) -> None:
-        """Test that re-applying normalization to already-normalized args/kwargs is a no-op"""
-
-        def _func(self: Any, a: str, /, b: str = "B") -> None: ...
-
-        args1, kwargs1 = normalize_call_args(_func, (), {"a": "7"})
-        args2, kwargs2 = normalize_call_args(_func, args1, kwargs1)
-        assert (args2, kwargs2) == (args1, kwargs1)
 
 
 class TestPeekLogLevel:

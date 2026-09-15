@@ -1,4 +1,5 @@
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
 from typing import TypeVar
 
 import pytest
@@ -9,7 +10,7 @@ from pytest import FixtureRequest
 from pytest_mock import MockerFixture
 
 from api_client_core import endpoint
-from api_client_core.base import APIClient, BaseAPI
+from api_client_core.core.base import APIClient, BaseAPI
 
 pytest_plugins = ["common_libs.testing.pytest_plugins.common"]
 
@@ -20,6 +21,23 @@ ClassT = TypeVar("ClassT", bound=BaseAPI)
 # Call it here, at collection time, so the cache is primed before `api_client_factory` below replaces
 # `Client.request` with a mock (which would otherwise poison the cache for the rest of this worker process).
 get_supported_request_parameters()
+
+
+@pytest.fixture(autouse=True)
+def _restore_sys_path() -> Iterator[None]:
+    """Snapshot and restore `sys.path` so a test's discovery side effect doesn't leak into others.
+
+    `ensure_project_on_sys_path()`, reached by any test that drives discovery or the CLI/MCP entry
+    points, prepends the current working directory to `sys.path` permanently by design. A test that
+    also `chdir`s into a `tmp_path` with no project marker therefore leaves that `tmp_path` on
+    `sys.path` after `monkeypatch` has restored the cwd, displacing the project root from
+    `sys.path[0]`. That in turn makes pytest's own `prepend`-mode importer re-insert the project
+    root, so it lands on `sys.path` twice. Autouse for the same reason `_restore_logging_state` is:
+    the leak crosses test files.
+    """
+    snapshot = sys.path[:]
+    yield
+    sys.path[:] = snapshot
 
 
 @pytest.fixture

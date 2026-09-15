@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
+from .._common.wrappers import WRAPPERS, WrapperSpec
+from .._common.wrappers import apply_wrappers as _fold_chain
+from .._common.wrappers import expected_statuses as _statuses_from_chain
 from ._constants import NOT_PROVIDED, WRAPPER_CHAIN_DEST, WrapperFlag
 from .parser import CollapsibleText
 
@@ -14,28 +17,6 @@ _WRAPPERS_GROUP_DESCRIPTION = (
 # Rendered verbatim (no re-wrap) under -h in place of the description above and every flag in the group, so each line
 # must already fit a narrow terminal.
 _WRAPPERS_GROUP_SHORT_DESCRIPTION = "This command supports call wrappers.\nUse --help for available options and syntax."
-_RETRY_SPEC: dict[str, type] = {"condition": int, "num_retries": int, "retry_after": float, "safe_methods_only": bool}
-_RATE_LIMIT_SPEC: dict[str, type] = {"max_requests": int, "interval": float}
-_REPEAT_SPEC: dict[str, type] = {"num": int, "return_exceptions": bool}
-_CONCURRENCY_SPEC: dict[str, type] = {"num": int, "max_connections": int, "return_exceptions": bool}
-# Inclusive lower bounds for a spec key whose value would otherwise silently no-op (num=0 repeats/runs the call
-# zero times) or reach an unrelated, poorly-worded failure deeper in the call stack (max_connections=0/num=0 for
-# with_concurrency() reaches a bare, message-less assertion in common_libs' job executor).
-_RETRY_MINIMUMS: dict[str, int | float] = {"num_retries": 0, "retry_after": 0}
-_RATE_LIMIT_MINIMUMS: dict[str, int | float] = {"max_requests": 1}
-_REPEAT_MINIMUMS: dict[str, int | float] = {"num": 1}
-_CONCURRENCY_MINIMUMS: dict[str, int | float] = {"num": 1, "max_connections": 1}
-
-_APPLIERS: dict[str, Callable[[Any, Any], Any]] = {
-    WrapperFlag.RETRY.dest: lambda ef, spec: ef.with_retry(**spec),
-    WrapperFlag.RATE_LIMIT.dest: lambda ef, spec: ef.with_rate_limit(**spec),
-    WrapperFlag.LOCK.dest: lambda ef, name: ef.with_lock(name),
-    WrapperFlag.EXPECTED_STATUS.dest: lambda ef, codes: ef.with_expected_status(*codes),
-    WrapperFlag.MAX_RESPONSE_TIME.dest: lambda ef, threshold: ef.with_max_response_time(threshold),
-    WrapperFlag.STATS.dest: lambda ef, _: ef.with_stats(),
-    WrapperFlag.REPEAT.dest: lambda ef, spec: ef.with_repeat(**spec),
-    WrapperFlag.CONCURRENCY.dest: lambda ef, spec: ef.with_concurrency(**spec),
-}
 
 
 def add_wrapper_arguments(parser: argparse.ArgumentParser) -> None:
@@ -65,7 +46,7 @@ def add_wrapper_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         const={},
         default=NOT_PROVIDED,
-        type=_spec_parser(_RETRY_SPEC, primary="condition", multi=frozenset({"condition"}), minimums=_RETRY_MINIMUMS),
+        type=_spec_parser(WRAPPERS[WrapperFlag.RETRY.dest]),
         action=_OrderedWrapperAction,
         metavar="SPEC",
         help="Retry on failure. Bare flag retries any non-2xx response once.\nSPEC: STATUS, or "
@@ -74,7 +55,7 @@ def add_wrapper_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         WrapperFlag.RATE_LIMIT,
         default=NOT_PROVIDED,
-        type=_spec_parser(_RATE_LIMIT_SPEC, primary="max_requests", minimums=_RATE_LIMIT_MINIMUMS),
+        type=_spec_parser(WRAPPERS[WrapperFlag.RATE_LIMIT.dest]),
         action=_OrderedWrapperAction,
         metavar="SPEC",
         help="Throttle calls with a client-side token bucket.\nSPEC: MAX_REQUESTS, or max_requests=N, interval=SECONDS",
@@ -120,7 +101,7 @@ def add_wrapper_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         const={},
         default=NOT_PROVIDED,
-        type=_spec_parser(_REPEAT_SPEC, primary="num", minimums=_REPEAT_MINIMUMS),
+        type=_spec_parser(WRAPPERS[WrapperFlag.REPEAT.dest]),
         action=_OrderedWrapperAction,
         metavar="SPEC",
         help="Repeat the call sequentially, returning a list of responses.\n"
@@ -131,7 +112,7 @@ def add_wrapper_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         const={},
         default=NOT_PROVIDED,
-        type=_spec_parser(_CONCURRENCY_SPEC, primary="num", minimums=_CONCURRENCY_MINIMUMS),
+        type=_spec_parser(WRAPPERS[WrapperFlag.CONCURRENCY.dest]),
         action=_OrderedWrapperAction,
         metavar="SPEC",
         help="Repeat the call concurrently, returning a list of responses.\n"
@@ -159,10 +140,7 @@ def apply_wrappers(endpoint_func: Any, namespace: argparse.Namespace) -> Callabl
     :param endpoint_func: The bound `EndpointFunc` to apply the selected wrappers to
     :param namespace: Namespace produced by parsing the registered wrapper flags
     """
-    ef = endpoint_func
-    for dest, value in _wrapper_chain(namespace):
-        ef = _APPLIERS[dest](ef, value)
-    return ef
+    return _fold_chain(endpoint_func, _boxed_chain(namespace))
 
 
 def expected_statuses(namespace: argparse.Namespace) -> tuple[int, ...]:
@@ -175,9 +153,7 @@ def expected_statuses(namespace: argparse.Namespace) -> tuple[int, ...]:
 
     :param namespace: Namespace produced by parsing the registered wrapper flags
     """
-    return tuple(
-        code for dest, value in _wrapper_chain(namespace) if dest == WrapperFlag.EXPECTED_STATUS.dest for code in value
-    )
+    return _statuses_from_chain(_boxed_chain(namespace))
 
 
 def _wrapper_chain(namespace: argparse.Namespace) -> tuple[tuple[str, Any], ...]:
@@ -188,6 +164,34 @@ def _wrapper_chain(namespace: argparse.Namespace) -> tuple[tuple[str, Any], ...]
     :param namespace: Namespace produced by parsing the registered wrapper flags
     """
     return tuple(getattr(namespace, WRAPPER_CHAIN_DEST, ()))
+
+
+def _boxed_chain(namespace: argparse.Namespace) -> list[tuple[str, dict[str, Any]]]:
+    """The recorded wrapper chain with each flag's raw namespace value boxed into an options mapping.
+
+    `--with-retry`/`--with-rate-limit`/`--with-repeat`/`--with-concurrency` already parse to an options
+    `dict` via `_spec_parser()`. The remaining flags parse to a bare value (`--with-lock` to a name or
+    `None`, `--with-expected-status` to a list, `--with-max-response-time` to a float, `--with-stats` to
+    `True`), which is boxed under the wrapper's own `primary` option name so the shared registry appliers
+    see one uniform `(name, options)` shape.
+
+    :param namespace: Namespace produced by parsing the registered wrapper flags
+    """
+    return [(dest, _as_options(dest, value)) for dest, value in _wrapper_chain(namespace)]
+
+
+def _as_options(dest: str, value: Any) -> dict[str, Any]:
+    """Box one wrapper flag's raw namespace value into an options mapping keyed by its `primary` option.
+
+    :param dest: The wrapper flag's `dest`, e.g. `with_lock` (also its `WRAPPERS` key)
+    :param value: The raw value recorded for that flag's occurrence
+    """
+    if isinstance(value, dict):
+        return value
+    spec = WRAPPERS[dest]
+    if spec.primary is None:
+        return {}
+    return {spec.primary: value}
 
 
 class _OrderedWrapperAction(argparse.Action):
@@ -214,42 +218,37 @@ class _OrderedWrapperAction(argparse.Action):
         chain.append((self.dest, value))
 
 
-def _spec_parser(
-    allowed: dict[str, type],
-    *,
-    primary: str | None = None,
-    multi: frozenset[str] = frozenset(),
-    minimums: dict[str, int | float] | None = None,
-) -> Callable[[str], dict[str, Any]]:
+def _spec_parser(spec: WrapperSpec) -> Callable[[str], dict[str, Any]]:
     """Build an `argparse` `type=` callable that parses a comma-separated `key=value` spec string.
 
-    Each item is `key=value`, or a bare boolean key (interpreted as `key=True`). If `primary` is given, a first item
-    with no key and no matching allowed key name is instead taken as that key's value (e.g. `--with-repeat 5` is
-    shorthand for `--with-repeat num=5`).
+    Each item is `key=value`, or a bare boolean key (interpreted as `key=True`). If the spec has a `primary`
+    option, a first item with no key and no matching allowed key name is instead taken as that option's value
+    (e.g. `--with-repeat 5` is shorthand for `--with-repeat num=5`).
 
-    A key listed in `multi` accumulates across repeated occurrences instead of the last one overwriting the
-    others: given once it still resolves to a bare scalar, matching every other key, and given more than once it
-    resolves to a `list` of each occurrence's own value, in the order given (e.g. `condition=429,condition=503`
-    for `with_retry()`, whose own `condition` parameter accepts either shape).
+    An option listed in the spec's `multi` accumulates across repeated occurrences instead of the last one
+    overwriting the others: given once it still resolves to a bare scalar, matching every other option, and
+    given more than once it resolves to a `list` of each occurrence's own value, in the order given (e.g.
+    `condition=429,condition=503` for `with_retry()`, whose own `condition` parameter accepts either shape).
 
-    A key listed in `minimums` is rejected here, at parse time, when its converted value falls below the given
-    bound, rather than being passed through to the wrapper itself: some out-of-range values (e.g. `num=0` for
-    `with_repeat()`/`with_concurrency()`) would otherwise silently run the call zero times instead of failing,
-    and others reach an unrelated, poorly-worded failure deep in a lower layer instead of a clean usage error.
+    An option listed in the spec's `minimums` is rejected here, at parse time, when its converted value falls
+    below the given bound, rather than being passed through to the wrapper itself: some out-of-range values
+    (e.g. `num=0` for `with_repeat()`/`with_concurrency()`) would otherwise silently run the call zero times
+    instead of failing, and others reach an unrelated, poorly-worded failure deep in a lower layer instead of
+    a clean usage error.
 
     Every raised `argparse.ArgumentTypeError` message deliberately omits the flag itself: argparse already
     prepends `argument --flag: ` to a `type=` converter's own error once it reaches the user, so including it
     here too would show the flag name twice.
 
-    :param allowed: Mapping of accepted spec keys to their target type (`int`, `float`, or `bool`)
-    :param primary: Key a first bare (unkeyed) item's value is assigned to, if any
-    :param multi: Spec keys that accumulate into a `list` across repeated occurrences, rather than each
-                  occurrence overwriting the last
-    :param minimums: Mapping of spec keys to their own inclusive lower bound, if any
+    :param spec: The wrapper whose accepted options this parser validates against
     """
+    allowed = spec.options
+    primary = spec.primary
+    multi = spec.multi
+    minimums = spec.minimums
 
     def parse(value: str) -> dict[str, Any]:
-        spec: dict[str, Any] = {}
+        parsed: dict[str, Any] = {}
         accumulated: dict[str, list[Any]] = {}
         for i, item in enumerate(item for item in value.split(",") if item):
             key, sep, raw = item.partition("=")
@@ -265,15 +264,15 @@ def _spec_parser(
                 key, converted = primary, _coerce(primary, key, allowed[primary])
             else:
                 raise argparse.ArgumentTypeError(_unknown_key_error(key, allowed))
-            if minimums is not None and key in minimums and converted < minimums[key]:
+            if key in minimums and converted < minimums[key]:
                 raise argparse.ArgumentTypeError(f"{key!r} must be >= {minimums[key]}, got {converted}")
             if key in multi:
                 accumulated.setdefault(key, []).append(converted)
             else:
-                spec[key] = converted
+                parsed[key] = converted
         for key, values in accumulated.items():
-            spec[key] = values[0] if len(values) == 1 else values
-        return spec
+            parsed[key] = values[0] if len(values) == 1 else values
+        return parsed
 
     return parse
 
@@ -299,7 +298,7 @@ def _coerce(key: str, raw: str, kind: type) -> Any:
         raise argparse.ArgumentTypeError(f"{key!r} must be {article} {kind.__name__}, got {raw!r}") from None
 
 
-def _unknown_key_error(key: str, allowed: dict[str, type]) -> str:
+def _unknown_key_error(key: str, allowed: Mapping[str, type]) -> str:
     """Format an 'unknown spec key' error message.
 
     :param key: The unrecognized key

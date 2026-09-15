@@ -1,10 +1,10 @@
 """Unit tests for `api_client_core.cli._entrypoint` (the `api-client` console entry point).
 
 Exercises the shell-completion hot path in isolation from `api_client_core`'s heavier submodules
-(`.base`/`.endpoints`, which pull in `httpx2`): completion-request routing, the parser rebuilt from a cached
-tree, and `main()`'s own top-level exit-code handling. See `_entrypoint`'s module docstring for why this hot
-path must never import that heavy chain. The on-disk completion cache itself (key computation, load/save,
-pruning) is tested separately in `test_cache.py`.
+(`core.base`/`core.endpoints`, which pull in `httpx2`): completion-request routing, the parser rebuilt from
+a cached tree, and `main()`'s own top-level exit-code handling. See `_entrypoint`'s module docstring for why
+this hot path must never import that heavy chain. The on-disk completion cache itself (key computation,
+load/save, pruning) is tested separately in `test_cache.py`.
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ from common_libs.ansi_colors import remove_color_code
 from pytest_mock import MockerFixture
 
 import api_client_core
+from api_client_core._common import paths as _paths
 from api_client_core.cli import _cache as cache
 from api_client_core.cli import _entrypoint as entrypoint
-from api_client_core.cli import _paths
 from api_client_core.cli.builder import _serialize_options, build_client_parser, build_completion_entry
 
 from .conftest import CliTestClient, get_subparsers_action
@@ -500,10 +500,10 @@ class TestHotPathAvoidsHeavyImports:
     """
 
     def test_cache_hit_never_imports_the_heavy_chain(self, tmp_path: Path) -> None:
-        """Test that reaching a cache hit, the common case, never triggers `api_client_core.base`,
-        `api_client_core.endpoints`, or `httpx2`'s import in a fresh process
+        """Test that reaching a cache hit, the common case, never triggers `api_client_core.core.base`,
+        `api_client_core.core.endpoints`, or `httpx2`'s import in a fresh process
 
-        Must run in a subprocess: by the time any other test runs, `api_client_core.base` and
+        Must run in a subprocess: by the time any other test runs, `api_client_core.core.base` and
         `.endpoints` are already imported (via conftest.py), so there is no in-process way to observe
         this.
         """
@@ -524,8 +524,9 @@ class TestHotPathAvoidsHeavyImports:
             entrypoint._build_parser_from_tree(tree)
 
             assert "httpx2" not in sys.modules, sorted(sys.modules)
-            assert "api_client_core.base" not in sys.modules, sorted(sys.modules)
-            assert "api_client_core.endpoints" not in sys.modules, sorted(sys.modules)
+            assert "api_client_core.core" not in sys.modules, sorted(sys.modules)
+            assert "api_client_core.core.base" not in sys.modules, sorted(sys.modules)
+            assert "api_client_core.core.endpoints" not in sys.modules, sorted(sys.modules)
             print("OK")
             """)
         result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
@@ -536,8 +537,8 @@ class TestHotPathAvoidsHeavyImports:
         """Test that `_complete()` itself, not just `load_cache()`/`_build_parser_from_tree()` in
         isolation, stays on the light path for an ordinary cache-hit request.
 
-        Must run in a subprocess: by the time any other test runs, `api_client_core.base` and `.endpoints`
-        are already imported (via conftest.py), so there is no in-process way to observe this.
+        Must run in a subprocess: by the time any other test runs, `api_client_core.core.base` and
+        `core.endpoints` are already imported (via conftest.py), so there is no in-process way to observe this.
         """
         script = textwrap.dedent(f"""
             import os
@@ -560,8 +561,9 @@ class TestHotPathAvoidsHeavyImports:
                 entrypoint._complete()
 
             assert "httpx2" not in sys.modules, sorted(sys.modules)
-            assert "api_client_core.base" not in sys.modules, sorted(sys.modules)
-            assert "api_client_core.endpoints" not in sys.modules, sorted(sys.modules)
+            assert "api_client_core.core" not in sys.modules, sorted(sys.modules)
+            assert "api_client_core.core.base" not in sys.modules, sorted(sys.modules)
+            assert "api_client_core.core.endpoints" not in sys.modules, sorted(sys.modules)
             print("OK")
             """)
         result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)

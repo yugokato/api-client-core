@@ -1,5 +1,5 @@
-API Client Core CLI
-====================
+API Client Core — CLI
+=====================
 
 Installing [api-client-core](../../../README.md) also installs the `api-client` command. It inspects your project, discovers your API clients, and automatically turns their endpoint definitions into fully featured command-line interfaces.
 
@@ -265,7 +265,7 @@ Use `--help` on any leaf command for the exact wrapper options and syntax suppor
 Tab completion is powered by [argcomplete](https://github.com/kislyuk/argcomplete). To enable tab completion, first install the optional dependency:
 
 ```bash
-pip install "api-client-core[cli-completion]@git+https://github.com/yugokato/api-client-core"
+pip install "api-client-core[cli-completion] @ git+https://github.com/yugokato/api-client-core.git"
 ```
 
 Then add the following to your shell startup file (`~/.bashrc` or `~/.bash_profile` for bash, `~/.zshrc` for zsh):

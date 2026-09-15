@@ -1,202 +1,102 @@
-"""Unit tests for core types.py"""
+"""Unit tests for the public `api_client_core.types` re-export shim (`types.py`)."""
 
 from __future__ import annotations
 
-from collections.abc import MutableMapping
-from dataclasses import MISSING, field
-from typing import Any
+import inspect
+import subprocess
+import sys
+import textwrap
 
-import pytest
+from common_libs.clients.rest_client.rate_limit import RateLimit, RateLimiter
+from common_libs.clients.rest_client.retry import BackoffStrategy, RetryPolicy
 
-from api_client_core.types import Alias, DataclassModelField, File, MultipartFormData
+import api_client_core.core.types as core_types
+import api_client_core.types as public_types
+from api_client_core.types import DataclassModel, ParamAnnotationType
 
+# Names the shim re-exports straight from the REST client library rather than from `core/types.py`.
+_CONFIG_REEXPORTS = {
+    "BackoffStrategy": BackoffStrategy,
+    "RateLimit": RateLimit,
+    "RateLimiter": RateLimiter,
+    "RetryPolicy": RetryPolicy,
+}
 
-class TestFile:
-    """Tests for the File dataclass"""
-
-    def test_creation(self) -> None:
-        """File stores filename, content, and content_type."""
-        f = File("logo.png", b"\x89PNG", "image/png")
-        assert f.filename == "logo.png"
-        assert f.content == b"\x89PNG"
-        assert f.content_type == "image/png"
-
-    def test_to_tuple(self) -> None:
-        """to_tuple() returns (filename, content, content_type)."""
-        f = File("doc.pdf", b"%PDF", "application/pdf")
-        assert f.to_tuple() == ("doc.pdf", b"%PDF", "application/pdf")
-
-    def test_dict_behavior(self) -> None:
-        """File also behaves as a dict (filename/content/content_type are keys)."""
-        f = File("img.jpg", b"JFIF", "image/jpeg")
-        assert f["filename"] == "img.jpg"
-        assert f["content"] == b"JFIF"
-        assert f["content_type"] == "image/jpeg"
-
-    def test_string_content(self) -> None:
-        """File can hold string content (not just bytes)."""
-        f = File("notes.txt", "Hello World", "text/plain")
-        assert f.content == "Hello World"
-        assert f.to_tuple() == ("notes.txt", "Hello World", "text/plain")
+# The model/annotation base classes a downstream reserved-name scan is expected to pick up by filtering
+# the module namespace for `ParamAnnotationType` / `DataclassModel` subclasses.
+_INTROSPECTABLE_MODEL_TYPES = {"Alias", "DataclassModel", "EndpointModel", "File", "ParamAnnotationType", "Query"}
 
 
-class TestMultipartFormData:
-    """Tests for the MultipartFormData MutableMapping wrapper"""
+class TestPublicSurface:
+    """Tests for the set of names `api_client_core.types` exports"""
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def logo(cls) -> File:
-        return File("logo.png", b"logo-content", "image/png")
+    def test_all_matches_module_namespace(self) -> None:
+        """Test that every `__all__` entry is bound on the module and every public binding is in `__all__`"""
+        exported = set(public_types.__all__)
+        bound = {name for name in vars(public_types) if not name.startswith("_")}
+        assert exported == bound
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def favicon(cls) -> File:
-        return File("favicon.ico", b"fav-content", "image/x-icon")
+    def test_all_is_sorted(self) -> None:
+        """Test that `__all__` stays in the isort-style order ruff enforces"""
+        assert public_types.__all__ == sorted(public_types.__all__)
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def dict_file(cls) -> dict[str, Any]:
-        return {"filename": "data.csv", "content": b"col1,col2", "content_type": "text/csv"}
+    def test_public_surface_is_core_plus_config_reexports(self) -> None:
+        """Test that the surface is exactly `core/types.py`'s exports plus the client-config re-exports"""
+        assert set(public_types.__all__) == set(core_types.__all__) | set(_CONFIG_REEXPORTS)
 
-    def test_init_with_file_objects(self, logo: File, favicon: File) -> None:
-        """File objects are stored as tuples via File.to_tuple()."""
-        files = MultipartFormData(logo=logo, favicon=favicon)
-        assert files["logo"] == logo.to_tuple()
-        assert files["favicon"] == favicon.to_tuple()
+    def test_config_types_are_the_rest_client_originals(self) -> None:
+        """Test that the client-config names resolve to the objects defined in the REST client library"""
+        for name, obj in _CONFIG_REEXPORTS.items():
+            assert getattr(public_types, name) is obj
 
-    def test_init_with_dict_objects(self, dict_file: dict[str, Any]) -> None:
-        """Dict values are stored as a tuple of their values."""
-        files = MultipartFormData(data=dict_file)
-        assert files["data"] == tuple(dict_file.values())
-
-    def test_init_skips_falsy_values(self, logo: File) -> None:
-        """Entries with falsy file values (None, empty string, etc.) are excluded."""
-        files = MultipartFormData(logo=logo, empty=None)
-        assert "logo" in files
-        assert "empty" not in files
-        assert len(files) == 1
-
-    def test_getitem(self, logo: File) -> None:
-        """__getitem__ returns the tuple stored under the given key."""
-        files = MultipartFormData(logo=logo)
-        assert files["logo"] == ("logo.png", b"logo-content", "image/png")
-
-    def test_setitem_file(self, logo: File) -> None:
-        """Assigning a File object converts it to a tuple."""
-        files = MultipartFormData(logo=logo)
-        new_logo = File("new-logo.png", b"new-content", "image/png")
-        files["logo"] = new_logo
-        assert files["logo"] == new_logo.to_tuple()
-
-    def test_setitem_dict(self, dict_file: dict[str, Any]) -> None:
-        """Assigning a dict converts it to a tuple of its values."""
-        files = MultipartFormData(data=dict_file)
-        new_dict = {"filename": "updated.csv", "content": b"a,b", "content_type": "text/csv"}
-        files["data"] = new_dict
-        assert files["data"] == tuple(new_dict.values())
-
-    def test_setitem_raw(self, logo: File) -> None:
-        """Assigning a raw (non-File, non-dict) value stores it as-is."""
-        files = MultipartFormData(logo=logo)
-        raw_tuple = ("raw.png", b"raw", "image/png")
-        files["logo"] = raw_tuple
-        assert files["logo"] == raw_tuple
-
-    def test_delitem(self, logo: File, favicon: File) -> None:
-        """Deleting a key removes it. Subsequent access raises KeyError."""
-        files = MultipartFormData(logo=logo, favicon=favicon)
-        del files["logo"]
-        assert "logo" not in files
-        with pytest.raises(KeyError):
-            _ = files["logo"]
-
-    def test_iter(self, logo: File, favicon: File) -> None:
-        """Iterating over MultipartFormData yields the key names."""
-        files = MultipartFormData(logo=logo, favicon=favicon)
-        keys = list(files)
-        assert set(keys) == {"logo", "favicon"}
-
-    def test_len(self, logo: File, favicon: File) -> None:
-        """len() returns the number of stored files."""
-        files = MultipartFormData(logo=logo, favicon=favicon)
-        assert len(files) == 2
-
-    def test_to_dict(self, logo: File) -> None:
-        """to_dict() returns a plain dict of {name: tuple} pairs."""
-        files = MultipartFormData(logo=logo)
-        result = files.to_dict()
-        assert isinstance(result, dict)
-        assert result == {"logo": logo.to_tuple()}
-
-    def test_mutable_mapping_protocol(self, logo: File, favicon: File) -> None:
-        """MultipartFormData is a MutableMapping. Standard mapping methods work."""
-        files = MultipartFormData(logo=logo, favicon=favicon)
-        assert isinstance(files, MutableMapping)
-        assert set(files.keys()) == {"logo", "favicon"}
-        assert len(list(files.values())) == 2
-        assert len(list(files.items())) == 2
-        for key, value in files.items():
-            assert value == files[key]
-
-    def test_string_content(self) -> None:
-        """File with string (non-bytes) content is handled without error."""
-        text_file = File("notes.txt", "plain text content", "text/plain")
-        files = MultipartFormData(notes=text_file)
-        assert files["notes"] == text_file.to_tuple()
-
-    def test_attribute_access(self, logo: File, favicon: File) -> None:
-        """Test that attribute-style access reads the correct value from each instance."""
-        files = MultipartFormData(logo=logo, favicon=favicon)
-        assert files.logo == logo.to_tuple()
-        assert files.favicon == favicon.to_tuple()
-
-    def test_attribute_missing_raises(self, logo: File) -> None:
-        """Test that accessing a non-existent key via attribute raises AttributeError."""
-        files = MultipartFormData(logo=logo)
-        assert not hasattr(files, "nonexistent")
-        with pytest.raises(AttributeError):
-            _ = files.nonexistent
+    def test_framework_types_are_shared_with_core(self) -> None:
+        """Test that each framework type is the same object whether reached via the shim or via `core`"""
+        for name in core_types.__all__:
+            assert getattr(public_types, name) is getattr(core_types, name)
 
 
-class TestAlias:
-    """Tests for the Alias frozen dataclass"""
+class TestEagerBinding:
+    """Tests that the shim binds its names at import time rather than lazily"""
 
-    def test_creation(self) -> None:
-        """Alias stores its value string."""
-        v = "x-param-name"
-        a = Alias(v)
-        assert a.value == v
+    def test_shim_has_no_module_getattr(self) -> None:
+        """Test that the shim defines no PEP 562 module `__getattr__`
 
-    def test_frozen(self) -> None:
-        """Alias is frozen. Assignment raises FrozenInstanceError."""
-        a = Alias("original")
-        with pytest.raises(Exception):  # FrozenInstanceError (AttributeError in older Python)
-            # noinspection PyDataclass
-            a.value = "changed"
+        A downstream project filters `vars(api_client_core.types).values()` directly for its reserved-name
+        scan, which a lazy module would leave empty until each name is first accessed.
+        """
+        assert "__getattr__" not in vars(public_types)
+
+    def test_names_are_bound_without_attribute_access(self) -> None:
+        """Test that a cold import of the shim already has every public name in its namespace
+
+        Runs in a subprocess so the check observes a module dict built from scratch. By the time any other
+        test runs the shim is already imported, so an in-process check on a lazy variant would pass
+        vacuously against names a prior access had cached.
+        """
+        script = textwrap.dedent("""
+            import api_client_core.types as t
+
+            missing = [name for name in t.__all__ if name not in vars(t)]
+            assert not missing, missing
+            assert "__getattr__" not in vars(t)
+        """)
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
+        assert result.returncode == 0, result.stderr
 
 
-class TestDataclassModelField:
-    """Tests for the DataclassModelField NamedTuple"""
+class TestDownstreamIntrospectionContract:
+    """Tests for the namespace shape a downstream reserved-name scan depends on"""
 
-    def test_creation(self) -> None:
-        """DataclassModelField stores name and type with MISSING default."""
-        f = DataclassModelField(name="param1", type=str)
-        assert f.name == "param1"
-        assert f.type is str
-        assert f.default is MISSING
+    def test_model_type_subclasses_in_namespace(self) -> None:
+        """Test that filtering the namespace for model/annotation base classes yields exactly the known set
 
-    def test_with_default(self) -> None:
-        """DataclassModelField stores an explicit default value."""
-        default_field = field(default=None)
-        f = DataclassModelField(name="optional_param", type=int, default=default_field)
-        assert f.name == "optional_param"
-        assert f.type is int
-        assert f.default is default_field
-
-    def test_namedtuple_unpacking(self) -> None:
-        """DataclassModelField supports tuple unpacking via NamedTuple."""
-        f = DataclassModelField(name="x", type=float)
-        name, tp, default = f
-        assert name == "x"
-        assert tp is float
-        assert default is MISSING
+        A downstream project iterates `vars(module).values()`, keeps the classes that subclass
+        `ParamAnnotationType` or `DataclassModel`, and treats their names as reserved. Widening the module
+        with the client-config re-exports must not change this set, since none of them are such a subclass.
+        """
+        found = {
+            obj.__name__
+            for obj in vars(public_types).values()
+            if inspect.isclass(obj) and issubclass(obj, ParamAnnotationType | DataclassModel)
+        }
+        assert found == _INTROSPECTABLE_MODEL_TYPES

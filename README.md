@@ -1,13 +1,13 @@
 API Client Core — A Framework for Building Python API Clients
-=================================================================
+=============================================================
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![test](https://github.com/yugokato/api-client-core/actions/workflows/test.yml/badge.svg)](https://github.com/yugokato/api-client-core/actions/workflows/test.yml)
 [![Code style ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 
-**API Client Core** is a framework for building Python API clients with decorator-based endpoint definitions. The `@endpoint` decorators turn plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, call wrappers, retries, and call statistics.
+**API Client Core** is a framework for building Python API clients with decorator-based endpoint definitions. The `@endpoint` decorator turns plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, call wrappers, retries, and call statistics.
 
-From the same endpoint definitions, the framework also automatically generates a command-line interface (CLI), allowing every endpoint to be invoked either programmatically or directly from the terminal.
+From the same endpoint definitions, the framework also automatically generates a command-line interface (CLI) and an MCP server, allowing every endpoint to be invoked programmatically, from the terminal, or by AI assistants through an MCP client such as Claude.
 
 It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
 
@@ -30,6 +30,7 @@ It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from 
 - [Sync vs Async](#sync-vs-async)
 - [Logging](#logging)
 - [Command-Line Interface (CLI)](#command-line-interface-cli)
+- [Model Context Protocol (MCP) Server](#model-context-protocol-mcp-server)
 - [Type and Response Reference](#type-and-response-reference)
 - [Extending Core](#extending-core)
 - [Development](#development)
@@ -39,15 +40,15 @@ It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from 
 
 - **Decorator-based endpoint definitions** — decorate a plain method with `@endpoint` and the framework handles the rest.
 - **Sync/async dual-mode** from the same source code — one endpoint definition works with both `sync` and `async` clients.
+- **Multiple interfaces** — automatically expose the same endpoint definitions as Python APIs, CLI commands, and MCP tools.
 - **Batteries-included** — built-in support for automatic retries, distributed locking, concurrent execution, streaming responses, and API call statistics.
-- **Built-in CLI support** — every endpoint definition automatically becomes a CLI command.
 - **Extensible** — customize behavior through request/response hooks and decorators.
 
 
 # Installation
 
 ```bash
-pip install git+https://github.com/yugokato/api-client-core
+pip install git+https://github.com/yugokato/api-client-core.git
 ```
 
 > [!NOTE]
@@ -72,7 +73,11 @@ class UsersAPI(BaseAPI):
         ...
 ```
 
-Call the endpoint like a regular Python method through your [API client](#building-an-api-client). The framework automatically builds and sends the HTTP request using the provided arguments and returns a `RestResponse`.  
+From this single definition, the endpoint can be invoked in three ways:
+
+### Python
+
+Call the endpoint as a regular Python method through your [API client](#building-an-api-client). The framework automatically builds and sends the HTTP request using the provided arguments and returns a `RestResponse`.  
 The same endpoint definition works in both `sync` and `async` mode. See [Sync vs Async](#sync-vs-async) for details.
 
 <details open>
@@ -102,12 +107,34 @@ The same endpoint definition works in both `sync` and `async` mode. See [Sync vs
 ```
 </details>
 
-You can also call the same endpoint directly from the terminal using the [automatically generated CLI](#command-line-interface-cli):
+
+### CLI
+
+Call the endpoint directly from the terminal using the [automatically generated CLI](#command-line-interface-cli):
 
 ```bash
 $ api-client my-app users get-user --user-id 42 --include-posts --output json
 {"id": 42, "name": "Jane Doe", "email": "jane@example.com", "posts": [{"id": 1, "title": "Hello World"}, {"id": 2, "title": "API Design Notes"}]}
 ````
+
+
+### MCP
+
+Call the endpoint from an MCP client such as Claude using natural language through the [automatically generated MCP server](#model-context-protocol-mcp-server):
+
+```text
+❯ Get user 42 including their posts
+
+⏺ Fetching user 42 with their posts included.
+
+  Called my-app (ctrl+o to expand)
+
+⏺ User 42: Jane Doe (jane@example.com)
+
+  Posts:
+  1. Hello World
+  2. API Design Notes
+```
 
 
 # Building an API Client
@@ -452,6 +479,16 @@ With automatic retries:
 r = client.auth.login.with_retry(condition=429, num_retries=3, retry_after=2)(username="foo", password="bar")
 ```
 
+With exponential backoff between retries:
+
+```python
+from api_client_core.types import BackoffStrategy
+
+r = client.auth.login.with_retry(condition=429, num_retries=3, retry_after=BackoffStrategy())(
+    username="foo", password="bar"
+)
+```
+
 Chaining wrappers:
 
 ```python
@@ -672,7 +709,7 @@ The framework automatically records per-endpoint metrics including call counts, 
 Call `Stats.show()` to display a formatted summary of recorded endpoint activity:
 
 ```pycon
->>> from api_client_core.endpoints import Stats
+>>> from api_client_core import Stats
 >>> client.auth.login.with_concurrency(num=10)(username="foo", password="bar")
 >>> client.users.get_user(user_id=42)
 >>> Stats.show()
@@ -877,6 +914,34 @@ Use `-h`/`--help` at any level to explore available clients, resources, commands
 See [`cli/README.md`](src/api_client_core/cli/README.md) for the full CLI guide.
 
 
+# Model Context Protocol (MCP) Server
+
+Installing the package with the `mcp` extra (`api-client-core[mcp]`) also provides an `api-client-mcp` command that exposes your API clients as an MCP server. Endpoints become MCP tools, and function parameters become JSON Schema tool inputs.
+
+For example, with Claude Code, add the server with:
+
+```bash
+claude mcp add my-app -- api-client-mcp my-app
+```
+
+Or configure it in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "my-app": {
+      "command": "api-client-mcp",
+      "args": ["my-app"]
+    }
+  }
+}
+```
+
+Start Claude Code and run `/mcp`. Confirm that the server is connected and its tools are available. Once connected, you can interact with your API using natural language.
+
+See [`mcp/README.md`](src/api_client_core/mcp/README.md) for the full MCP guide.
+
+
 # Type and Response Reference
 
 ## `RestResponse`
@@ -978,6 +1043,44 @@ def create_session(
 ```
 
 The framework sends `"user-id"` as the actual key in the request payload while the Python parameter is named `user_id`.
+
+## What `api_client_core.types` exports
+
+Every public type has a single import home at `api_client_core.types`:
+
+```python
+from api_client_core.types import RestResponse, Kwargs, Unset, Query, Alias
+```
+
+**Endpoint-authoring types** — used when writing endpoint functions and their signatures:
+
+| Name                | Purpose                                                                      |
+|---------------------|-----------------------------------------------------------------------------|
+| `RestResponse`      | Return type of every endpoint call.                                          |
+| `Kwargs`            | `TypedDict` for `**kwargs: Unpack[Kwargs]` in endpoint signatures.           |
+| `Unset`             | Sentinel default that keeps a parameter out of the payload unless provided.  |
+| `Query`             | `Annotated` marker forcing a parameter into the query string on non-GET.     |
+| `Alias`             | `Annotated` marker overriding a parameter's wire name.                       |
+| `File`              | A single file for a `multipart/form-data` upload.                            |
+| `MultipartFormData` | A mapping of named `File`s for a multi-file upload.                          |
+
+**Model and extension-point types** — for building or introspecting parameter models:
+
+| Name                  | Purpose                                                                          |
+|-----------------------|--------------------------------------------------------------------------------|
+| `EndpointModel`       | Base of the dynamically generated per-endpoint parameter model.                  |
+| `DataclassModel`      | Base of `EndpointModel` and custom parameter models.                             |
+| `DataclassModelField` | `(name, type, default)` triple for assembling a model programmatically.          |
+| `ParamAnnotationType` | Base class for defining custom `Annotated` parameter markers.                    |
+
+**Client-configuration re-exports** — forwarded from the underlying REST client so callers need only one import:
+
+| Name              | Used with                                                                            |
+|-------------------|------------------------------------------------------------------------------------|
+| `RateLimit`       | `APIClient(..., rate_limit=RateLimit(...))`.                                          |
+| `RateLimiter`     | A pre-built bucket for `with_rate_limit(limiter=...)`.                                |
+| `RetryPolicy`     | `APIClient(..., retry_policy=RetryPolicy(...))`.                                      |
+| `BackoffStrategy` | The exponential-backoff value for `with_retry(retry_after=...)` and `RetryPolicy`.    |
 
 
 # Extending Core
@@ -1119,7 +1222,7 @@ Override any of them on your app-level base class to inject custom behavior into
 
 ```python
 from api_client_core import BaseAPI
-from api_client_core.endpoints.endpoint_func import SyncEndpointFunc, AsyncEndpointFunc
+from api_client_core.core.endpoints.endpoint_func import SyncEndpointFunc, AsyncEndpointFunc
 
 
 class MyEndpointFunc(SyncEndpointFunc):

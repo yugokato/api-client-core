@@ -11,10 +11,10 @@ from pytest import CaptureFixture
 from pytest_mock import MockerFixture
 
 from api_client_core import APIClient, __version__
+from api_client_core._common.console import reserve_stdout
+from api_client_core._common.discovery import DiscoveryResult
 from api_client_core.cli._constants import PROG
-from api_client_core.cli._stdout import reserve_stdout
 from api_client_core.cli.builder import _TAB_COMPLETION_TIP, build_initial_parser
-from api_client_core.cli.discovery import DiscoveryResult
 from api_client_core.cli.dispatch import dispatch
 from examples.dummyjson.client import DummyJSONClient
 

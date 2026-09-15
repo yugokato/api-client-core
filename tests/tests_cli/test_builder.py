@@ -17,6 +17,7 @@ from pytest import CaptureFixture
 from pytest_mock import MockerFixture
 
 from api_client_core import APIClient, BaseAPI, __version__, endpoint
+from api_client_core._common.discovery import DiscoveryResult
 from api_client_core.cli._cache import mark_completion_registered
 from api_client_core.cli._constants import PROG, Flag, WrapperFlag
 from api_client_core.cli.builder import (
@@ -35,7 +36,6 @@ from api_client_core.cli.builder import (
 )
 from api_client_core.cli.builder import _generate_description as real_generate_description
 from api_client_core.cli.builder import add_endpoint_arguments as real_add_endpoint_arguments
-from api_client_core.cli.discovery import DiscoveryResult
 from api_client_core.cli.params import _PARAMS_GROUP_TITLE, accepts_json_file, reset_stdin_state
 from api_client_core.cli.wrappers import (
     _WRAPPERS_GROUP_DESCRIPTION,
@@ -785,8 +785,8 @@ class TestBuildClientParser:
             build_client_parser(AllEmptyClient)
 
     def test_camelcase_attribute_and_function_names_normalize_to_kebab_case(self) -> None:
-        """Test that a resource/command derived from a capitalized or camelCase name (matching
-        `openapi-test-client`'s own `client.Users`-style convention) still normalizes to an idiomatic,
+        """Test that a resource/command derived from a capitalized or camelCase name (matching a
+        common `client.Users`-style naming convention) still normalizes to an idiomatic,
         lowercase kebab-case CLI token, end to end through `build_client_parser()`
         """
 

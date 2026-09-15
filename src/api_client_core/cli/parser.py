@@ -9,8 +9,8 @@ from typing import IO, Any, NoReturn, TextIO, cast
 
 from common_libs.ansi_colors import ColorCodes, color
 
+from .._common.console import output_to, real_stdout
 from ._constants import ELLIPSIS, Flag
-from ._stdout import cli_output, cli_stdout
 from .utils import get_terminal_width
 
 _SHORT_HELP_TIP = "Use --help for full details"
@@ -44,39 +44,39 @@ class ArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         """Print this parser's own usage line followed by a red `error: <message>` line to stderr, then exit
         with code 2, mirroring `argparse.ArgumentParser.error()`'s own contract but through this class's
-        colored, stream-aware `print_usage()`/`cli_output()` instead of a bare `sys.stderr.write()`.
+        colored, stream-aware `print_usage()`/`output_to()` instead of a bare `sys.stderr.write()`.
 
         :param message: The error message, without the leading `error: ` this method adds itself
         """
         self.print_usage(sys.stderr)
-        with cli_output(sys.stderr):
+        with output_to(sys.stderr):
             error_message = color(f"error: {message}\n", color_code=ColorCodes.RED)
         self.exit(2, error_message)
 
     def print_help(self, file: IO[str] | None = None, *, short: bool = False) -> None:
         """Resolve the default output stream before `argparse` replaces `None` with `sys.stdout`, preserving an explicit
-        `sys.stderr` even when `reserve_stdout()` makes `sys.stdout is sys.stderr`. Wrapping in `cli_output()` keeps
+        `sys.stderr` even when `reserve_stdout()` makes `sys.stdout is sys.stderr`. Wrapping in `output_to()` keeps
         formatter color decisions consistent with that resolved stream. The `cast()` reflects what is already true at
         runtime (`file` is always stdout/stderr), and `_print_message()` preserves `argparse`'s normal broken-pipe
         handling.
 
-        :param file: Stream to print to. Defaults to `cli_stdout()` (the reserved real stdout, if a
+        :param file: Stream to print to. Defaults to `real_stdout()` (the reserved real stdout, if a
                      `reserve_stdout()` block is active, else `sys.stdout` itself), matching `argparse`'s own
                      default-to-`sys.stdout` behavior
         :param short: Forwarded to `format_help()`: whether to render the condensed `-h` form
         """
-        stream = cli_stdout() if file is None else cast(TextIO, file)
-        with cli_output(stream):
+        stream = real_stdout() if file is None else cast(TextIO, file)
+        with output_to(stream):
             self._print_message(self.format_help(short=short), stream)
 
     def print_usage(self, file: IO[str] | None = None) -> None:
         """Print this parser's own usage line, following the same stream-resolution and color rules as
         `print_help()`.
 
-        :param file: Stream to print to. Defaults to `cli_stdout()`, matching `print_help()`'s own default
+        :param file: Stream to print to. Defaults to `real_stdout()`, matching `print_help()`'s own default
         """
-        stream = cli_stdout() if file is None else cast(TextIO, file)
-        with cli_output(stream):
+        stream = real_stdout() if file is None else cast(TextIO, file)
+        with output_to(stream):
             super().print_usage(stream)
 
     def format_help(self, *, short: bool = False) -> str:

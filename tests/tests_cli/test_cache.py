@@ -16,7 +16,8 @@ from typing import Any
 import pytest
 from pytest_mock import MockerFixture
 
-from api_client_core.cli import _cache, _paths
+from api_client_core._common import paths as _paths
+from api_client_core.cli import _cache
 
 _SAMPLE_TREE: dict[str, Any] = {
     "cli-test": {

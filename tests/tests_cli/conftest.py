@@ -16,12 +16,14 @@ import sys
 from collections.abc import Iterator
 from enum import Enum
 from functools import cached_property
+from http import HTTPStatus
 from pathlib import Path
 from typing import Annotated, Any, Literal, Unpack
 from uuid import uuid4
 
 import pytest
 from common_libs.clients.rest_client.types import Response
+from httpx2 import HTTPStatusError
 from pytest_mock import MockerFixture
 
 from api_client_core import APIClient, BaseAPI, endpoint
@@ -359,6 +361,10 @@ def patch_argcomplete_installed(mocker: MockerFixture, *, installed: bool) -> No
 def make_httpx_response(mocker: MockerFixture, status_code: int, *, json_body: Any = None, text: str = "") -> Response:
     """Build a minimal mocked httpx2 `Response` with the given status code and JSON/text body.
 
+    `raise_for_status()` mirrors the real one: it returns the response for a 2xx and raises
+    `HTTPStatusError` (carrying this same response) for anything else, so a `raise_on_error=True` client
+    built on this mock actually raises rather than silently returning the failed response.
+
     :param mocker: pytest-mock fixture
     :param status_code: HTTP status code the mocked response reports
     :param json_body: Value returned by the mocked response's `.json()`. Defaults to `{}`
@@ -366,8 +372,8 @@ def make_httpx_response(mocker: MockerFixture, status_code: int, *, json_body: A
     """
     r = mocker.MagicMock(spec=Response)
     r.status_code = status_code
-    r.is_success = status_code < 300
-    r.reason_phrase = "OK" if status_code < 300 else "Not Found"
+    r.is_success = 200 <= status_code < 300
+    r.reason_phrase = _reason_phrase(status_code)
     r.headers = {}
     r.content = b"{}"
     r.is_stream = False
@@ -379,6 +385,12 @@ def make_httpx_response(mocker: MockerFixture, status_code: int, *, json_body: A
     r.request.request_id = "test-request-id"
     r.request.method = "GET"
     r.request.url = "https://example.com/api/widgets/1"
+    if r.is_success:
+        r.raise_for_status.return_value = r
+    else:
+        r.raise_for_status.side_effect = HTTPStatusError(
+            f"{status_code} {r.reason_phrase}", request=r.request, response=r
+        )
     return r
 
 
@@ -393,3 +405,14 @@ def make_rest_response(
     :param text: Value for the mocked response's `.text`, used as a fallback body
     """
     return RestResponse(_response=make_httpx_response(mocker, status_code, json_body=json_body, text=text))
+
+
+def _reason_phrase(status_code: int) -> str:
+    """Return the standard HTTP reason phrase for `status_code`, or `""` for a non-standard code.
+
+    :param status_code: HTTP status code
+    """
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return ""

@@ -7,9 +7,9 @@ import pytest
 from pytest import CaptureFixture
 from pytest_mock import MockerFixture
 
+from api_client_core._common.wrappers import WRAPPERS
 from api_client_core.cli._constants import NOT_PROVIDED, WrapperFlag
 from api_client_core.cli.wrappers import (
-    _APPLIERS,
     _WRAPPERS_GROUP_TITLE,
     add_wrapper_arguments,
     any_wrapper_given,
@@ -349,7 +349,7 @@ class TestApplyWrappers:
                 {},
                 id="with_expected_status_codes_as_positional_args",
             ),
-            pytest.param(["--with-lock"], "with_lock", (None,), {}, id="with_lock_bare_flag_is_none"),
+            pytest.param(["--with-lock"], "with_lock", (), {"lock_name": None}, id="with_lock_bare_flag_is_none"),
         ],
     )
     def test_a_chainable_wrapper_is_called_with_its_parsed_spec(
@@ -363,7 +363,7 @@ class TestApplyWrappers:
         """Test that apply_wrappers() calls each chainable wrapper with its own parsed spec: keyword
         arguments for with_retry() (forwarding a repeated `condition=` spec key as a list, matching its own
         `Sequence[int | ...]` shape), positional status codes for with_expected_status() (matching its own
-        variadic signature), and an explicit None for a bare --with-lock (parsed to None)
+        variadic signature), and an explicit `lock_name=None` for a bare --with-lock (parsed to None)
         """
         args = _build_parser().parse_args(argv)
         ef = mocker.MagicMock()
@@ -478,15 +478,15 @@ class TestApplyWrappers:
             apply_wrappers(ef, args)
 
 
-class TestAppliersCoverage:
-    """Tests that `_APPLIERS`, the wrapper-dest-to-applier-function table `apply_wrappers()` folds over,
-    stays in sync with `WrapperFlag`, since it's keyed by each member's own derived `dest` rather than a
-    hand-copied literal
+class TestRegistryCoverage:
+    """Tests that the shared `WRAPPERS` registry `apply_wrappers()` folds over stays in sync with
+    `WrapperFlag`, since each `WrapperFlag` member's own derived `dest` is used directly as a registry
+    key rather than a hand-copied literal
     """
 
-    def test_every_wrapper_flag_has_an_applier(self) -> None:
-        """Test that every `WrapperFlag` member's own `dest` has a matching entry in `_APPLIERS`, so a
-        member added to the enum without a matching applier would be caught here rather than failing only
-        once that specific flag is actually given on a real command line
+    def test_every_wrapper_flag_has_a_registry_entry(self) -> None:
+        """Test that the set of `WrapperFlag` member `dest`s is exactly the set of `WRAPPERS` keys, so a
+        member added to the enum (or the registry) without its counterpart would be caught here rather
+        than failing only once that specific flag is actually given on a real command line
         """
-        assert set(_APPLIERS) == {flag.dest for flag in WrapperFlag}
+        assert {flag.dest for flag in WrapperFlag} == set(WRAPPERS)
