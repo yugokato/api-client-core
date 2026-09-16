@@ -1,7 +1,7 @@
 API Client Core — MCP Server
 ============================
 
-Installing [api-client-core](../../../README.md) with the `mcp` extra also installs the `api-client-mcp` command. It inspects your project, discovers your API clients, and turns their endpoint definitions into MCP tools, allowing AI assistants to discover and call your API directly.
+Installing [api-client-core](../../../README.md) with the `mcp` extra also installs the `api-client-mcp` command. It inspects your project, discovers your API clients, and turns their endpoint definitions into MCP tools, allowing AI agents to discover and call your API directly.
 
 This guide covers the key concepts beyond `-h`/`--help`, which documents every option.
 

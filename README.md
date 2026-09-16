@@ -1,13 +1,13 @@
-API Client Core — A Framework for Building Python API Clients
-=============================================================
+API Client Core — A Framework for Building AI-Ready Python API Clients
+======================================================================
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![test](https://github.com/yugokato/api-client-core/actions/workflows/test.yml/badge.svg)](https://github.com/yugokato/api-client-core/actions/workflows/test.yml)
 [![Code style ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 
-**API Client Core** is a framework for building Python API clients with decorator-based endpoint definitions. The `@endpoint` decorator turns plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, call wrappers, retries, and call statistics.
+**API Client Core** is a framework for building AI-ready Python API clients with decorator-based endpoint definitions. The `@endpoint` decorator turns plain class methods into fully managed endpoint functions that automatically build HTTP requests, support both sync and async execution, and provide extensible capabilities such as request hooks, call wrappers, retries, and call statistics.
 
-From the same endpoint definitions, the framework also automatically generates a command-line interface (CLI) and an MCP server, allowing every endpoint to be invoked programmatically, from the terminal, or by AI assistants through an MCP client such as Claude.
+From the same endpoint definitions, the framework also automatically generates CLI commands and MCP tools, along with an MCP server, allowing every endpoint to be invoked programmatically, from the terminal, or by AI agents through an MCP client such as Claude Code.
 
 It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
 
@@ -120,7 +120,7 @@ $ api-client my-app users get-user --user-id 42 --include-posts --output json
 
 ### MCP
 
-Call the endpoint from an MCP client such as Claude using natural language through the [automatically generated MCP server](#model-context-protocol-mcp-server):
+Call the endpoint from an MCP client such as Claude Code using natural language through the [automatically generated MCP server](#model-context-protocol-mcp-server):
 
 ```text
 ❯ Get user 42 including their posts
