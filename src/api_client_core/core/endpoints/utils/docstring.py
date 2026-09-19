@@ -54,7 +54,7 @@ def split_param_docs(doc: str | None) -> tuple[str, dict[str, str]]:
     return "\n".join(prose), {name: " ".join(parts) for name, parts in params.items()}
 
 
-def first_doc_line(doc: str | None) -> str | None:
+def get_first_doc_line(doc: str | None) -> str | None:
     """Return the first non-blank line of a docstring, or `None` if it has none.
 
     :param doc: Docstring to summarize

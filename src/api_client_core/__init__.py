@@ -4,16 +4,36 @@ from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from api_client_core.core.base import APIClient, BaseAPI
-    from api_client_core.core.endpoints import Endpoint, EndpointFunc, Stats, endpoint
+    from api_client_core.core.endpoints import (
+        Endpoint,
+        EndpointFunc,
+        EndpointIntrospection,
+        EndpointParam,
+        Stats,
+        endpoint,
+    )
     from api_client_core.logging import setup_logging
 
-__all__ = ["APIClient", "BaseAPI", "Endpoint", "EndpointFunc", "Stats", "__version__", "endpoint", "setup_logging"]
+__all__ = [
+    "APIClient",
+    "BaseAPI",
+    "Endpoint",
+    "EndpointFunc",
+    "EndpointIntrospection",
+    "EndpointParam",
+    "Stats",
+    "__version__",
+    "endpoint",
+    "setup_logging",
+]
 
 _LAZY_ATTRS: Final[dict[str, str]] = {
     "APIClient": "api_client_core.core.base",
     "BaseAPI": "api_client_core.core.base",
     "Endpoint": "api_client_core.core.endpoints",
     "EndpointFunc": "api_client_core.core.endpoints",
+    "EndpointIntrospection": "api_client_core.core.endpoints",
+    "EndpointParam": "api_client_core.core.endpoints",
     "Stats": "api_client_core.core.endpoints",
     "endpoint": "api_client_core.core.endpoints",
     "setup_logging": "api_client_core.logging",

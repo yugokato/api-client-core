@@ -37,7 +37,7 @@ from ._constants import (
     ResponseFormat,
 )
 from .errors import ToolArgumentError
-from .schema import iter_param_fields, unwrap_annotation
+from .schema import iter_param_fields
 from .wrappers import parse_call_wrappers
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ async def dispatch_endpoint_call(
     try:
         call_wrapper_plan = parse_call_wrappers(call_wrappers)
         call_kwargs = _coerce_arguments(endpoint, arguments, options, mode=mode)
-        call_args, call_kwargs = normalize_call_args(endpoint.original_func, (), call_kwargs)
+        call_args, call_kwargs = normalize_call_args(endpoint.introspection.original_func, (), call_kwargs)
     except (ToolArgumentError, TypeError) as e:
         return ToolResult(content=str(e), structured=None, is_error=True)
 
@@ -97,8 +97,7 @@ async def dispatch_endpoint_call(
     try:
         if call_wrapper_plan.chain:
             # Wrappers require the bound EndpointFunc, not the plain Endpoint facade, to compose.
-            api_class = endpoint.api_class(client)
-            call: Any | None = apply_wrappers(getattr(api_class, endpoint.func_name), call_wrapper_plan.chain)
+            call: Any | None = apply_wrappers(endpoint.bind(client), call_wrapper_plan.chain)
         else:
             call = None
     except (TypeError, ValueError) as e:
@@ -217,7 +216,7 @@ def _coerce_arguments(
     :param mode: The server's resolved exposure mode, if known - lets an unknown-argument error name the
                  right tool to check instead of hedging between both
     """
-    specs = {param_field.param_name: param_field for param_field in iter_param_fields(endpoint)}
+    specs = {param.name: param for param in iter_param_fields(endpoint)}
 
     unknown = sorted(set(arguments) - set(specs))
     if unknown:
@@ -236,11 +235,11 @@ def _coerce_arguments(
                 "the accepted parameters."
             )
         raise ToolArgumentError(f"Unknown argument(s) for {endpoint}: {', '.join(unknown)}. {hint}")
-    missing = sorted(spec.param_name for spec in specs.values() if spec.required and spec.param_name not in arguments)
+    missing = sorted(spec.name for spec in specs.values() if spec.required and spec.name not in arguments)
     if missing:
         raise ToolArgumentError(f"Missing required argument(s) for {endpoint}: {', '.join(missing)}")
 
-    return {name: _coerce_value(value, specs[name].field.type, options) for name, value in arguments.items()}
+    return {name: _coerce_value(value, specs[name].annotation, options) for name, value in arguments.items()}
 
 
 def _coerce_value(value: Any, annotation: Any, options: ServerOptions) -> Any:
@@ -258,7 +257,7 @@ def _coerce_value(value: Any, annotation: Any, options: ServerOptions) -> Any:
     """
     if value is None:
         return None
-    base, _ = unwrap_annotation(annotation)
+    base, _ = param_type_util.unwrap_annotation(annotation)
     if get_origin(base) in (Union, UnionType):
         members = get_args(base)
         ordered = sorted(members, key=lambda m: 0 if _can_reject_value(m) else 1)
@@ -300,7 +299,7 @@ def _can_reject_value(member: Any) -> bool:
 
     :param member: One member of a genuine multi-member union, not yet unwrapped
     """
-    base, _ = unwrap_annotation(member)
+    base, _ = param_type_util.unwrap_annotation(member)
     return (inspect.isclass(base) and issubclass(base, Enum)) or param_type_util.is_type_of(base, File)
 
 

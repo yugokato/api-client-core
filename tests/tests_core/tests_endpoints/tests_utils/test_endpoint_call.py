@@ -42,7 +42,7 @@ def _make_endpoint(
     :param is_documented: Whether the endpoint is documented (controls param-warning behaviour).
     :param is_deprecated: Whether the endpoint is deprecated.
     :param func_name: Function name stored on the endpoint.
-    :param use_query_string: Value for `endpoint.model.endpoint_func._use_query_string`.
+    :param use_query_string: Value for `endpoint.use_query_string`.
     :param field_metadata: Per-field `dataclasses.field(metadata=...)` override, keyed by field name.
 
     """
@@ -54,10 +54,7 @@ def _make_endpoint(
         "TestEndpointModel",
         field_list,
         bases=(EndpointModel,),
-        namespace={
-            "content_type": content_type,
-            "endpoint_func": SimpleNamespace(_use_query_string=use_query_string),
-        },
+        namespace={"content_type": content_type, "endpoint_func": SimpleNamespace()},
         kw_only=True,
         frozen=True,
     )
@@ -68,6 +65,7 @@ def _make_endpoint(
         func_name=func_name,
         model=model,
         content_type=content_type,
+        use_query_string=use_query_string,
         is_documented=is_documented,
         is_deprecated=is_deprecated,
     )

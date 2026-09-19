@@ -7,25 +7,22 @@ import mimetypes
 import re
 import sys
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import MISSING, Field
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum, IntEnum, StrEnum
 from pathlib import Path
 from types import NoneType, UnionType
-from typing import Annotated, Any, Literal, NamedTuple, Union, get_args, get_origin
+from typing import Any, Literal, NamedTuple, Union, get_args, get_origin
 from uuid import UUID
 
 from common_libs.ansi_colors import ColorCodes
 from common_libs.logging import get_logger
 from common_libs.utils import dedup
 
-from api_client_core._common.docstring import split_param_docs
-from api_client_core.core.endpoints import Endpoint
-from api_client_core.core.endpoints.utils import endpoint_call as endpoint_call_util
+from api_client_core.core.endpoints import Endpoint, EndpointParam
 from api_client_core.core.endpoints.utils import param_type as param_type_util
-from api_client_core.core.endpoints.utils.endpoint_model import get_reserved_param_names, resolve_signature_name
-from api_client_core.core.types import File, Unset
+from api_client_core.core.endpoints.utils.endpoint_model import get_reserved_param_names
+from api_client_core.core.types import File
 
 from .._common.console import LOG_LEVELS
 from ._constants import ELLIPSIS, NOT_PROVIDED, RESERVED_CLI_FLAGS, WRAPPER_CHAIN_DEST, Flag
@@ -146,45 +143,39 @@ def add_endpoint_arguments(parser: argparse.ArgumentParser, endpoint: Endpoint[A
     :param endpoint: Endpoint whose parameter model drives the generated arguments
     """
     group = parser.add_argument_group(_PARAMS_GROUP_TITLE)
-    sig = endpoint_call_util.get_params_signature(endpoint.original_func)
-    resolved = list(_resolve_params(endpoint, sig, warn=True))
-    _, param_docs = split_param_docs(endpoint.original_func.__doc__)
+    resolved = list(_resolve_params(endpoint, warn=True))
+    param_docs = endpoint.introspection.param_docs
     # Widest displayed value-type name among this endpoint's parameters, so every row's marker column aligns
     # regardless of how long the preceding type name is. 0 when no parameter has one, in which case the column
     # is omitted entirely rather than padded to nothing.
     type_width = max((len(spec.display_type) for *_, spec in resolved if spec.display_type), default=0)
-    for field, param_name, dest, flag, spec in resolved:
-        sig_param = sig.parameters.get(param_name)
-        required = sig_param is not None and sig_param.default is inspect.Parameter.empty
-
+    for param, dest, flag, spec in resolved:
         arg_kwargs = spec.kwargs
         arg_kwargs["dest"] = dest
-        original_flag = _flag_for(param_name)
+        original_flag = _flag_for(param.name)
         renamed_from = original_flag if flag != original_flag else None
         try:
             arg_kwargs["help"] = _help_text(
-                endpoint,
-                field,
-                required=required,
+                param,
                 spec=spec,
                 type_width=type_width,
                 renamed_from=renamed_from,
-                description=param_docs.get(param_name),
+                description=param_docs.get(param.name),
             )
         except Exception as e:
             # A pathological __repr__ on a default value shouldn't take out the whole command: fall back to the bare
             # location marker for this one parameter's help.
             logger.warning(
                 f"{endpoint.api_class.__name__}.{endpoint.func_name}: Failed to build help text for parameter "
-                f"{param_name!r}: {type(e).__name__}: {e}"
+                f"{param.name!r}: {type(e).__name__}: {e}"
             )
-            arg_kwargs["help"] = f"[{endpoint_call_util.get_param_location(endpoint, field)}]"
+            arg_kwargs["help"] = f"[{param.location}]"
         if arg_kwargs.get("nargs") in _REPEATABLE_NARGS and "metavar" not in arg_kwargs:
             # Names the single value each repetition takes, rather than argparse's own dest-derived metavar,
             # which is usually the parameter's own plural name (e.g. "products") and reads as if the whole
             # collection were expected per value.
             arg_kwargs["metavar"] = _LIST_METAVAR
-        if required:
+        if param.required:
             arg_kwargs["required"] = True
             if arg_kwargs.get("nargs") == "*":
                 # A required list must accept at least one value: nargs="*" would otherwise also accept zero.
@@ -199,7 +190,7 @@ def add_endpoint_arguments(parser: argparse.ArgumentParser, endpoint: Endpoint[A
             # the whole command either: skip just this one parameter.
             logger.warning(
                 f"{endpoint.api_class.__name__}.{endpoint.func_name}: Unable to add option {flag!r} for "
-                f"parameter {param_name!r}: {type(e).__name__}: {e}"
+                f"parameter {param.name!r}: {type(e).__name__}: {e}"
             )
             continue
         if spec.accepts_file_path:
@@ -214,18 +205,17 @@ def collect_call_kwargs(endpoint: Endpoint[Any], namespace: argparse.Namespace) 
     """Build endpoint call kwargs from a parsed namespace, omitting flags the caller didn't provide.
 
     Keys are the original signature parameter names, not the model field names, so the endpoint call actually
-    binds each value to its target parameter. Read back from `dest`, not `param_name`: the two differ for a
-    parameter whose own flag was renamed to a trailing-underscore alias, since its value is parsed into that
-    alias's own dest, not one named after the parameter itself. A parameter skipped or never registered as a
-    flag is skipped here identically, via the `getattr()` default below, since no namespace attribute was
-    ever added for it.
+    binds each value to its target parameter. Read back from `dest`, not the parameter's name: the two
+    differ for a parameter whose own flag was renamed to a trailing-underscore alias, since its value is
+    parsed into that alias's own dest, not one named after the parameter itself. A parameter skipped or
+    never registered as a flag is skipped here identically, via the `getattr()` default below, since no
+    namespace attribute was ever added for it.
 
     :param endpoint: Endpoint the parsed namespace was built for
     :param namespace: Namespace produced by parsing the endpoint's registered arguments
     """
-    sig = endpoint_call_util.get_params_signature(endpoint.original_func)
     call_kwargs: dict[str, Any] = {}
-    for _f, param_name, dest, _flag, _spec in _resolve_params(endpoint, sig):
+    for param, dest, _flag, _spec in _resolve_params(endpoint):
         value = getattr(namespace, dest, NOT_PROVIDED)
         if value is NOT_PROVIDED:
             continue
@@ -233,7 +223,7 @@ def collect_call_kwargs(endpoint: Endpoint[Any], namespace: argparse.Namespace) 
             value = _to_file(value)
         elif isinstance(value, list):
             value = [_to_file(v) if isinstance(v, Path) else v for v in value]
-        call_kwargs[param_name] = value
+        call_kwargs[param.name] = value
     return call_kwargs
 
 
@@ -307,52 +297,51 @@ class _ArgSpec(NamedTuple):
 
 
 def _resolve_params(
-    endpoint: Endpoint[Any], sig: inspect.Signature, *, warn: bool = False
-) -> Iterator[tuple[Field[Any], str, str, str, _ArgSpec]]:
-    """Yield each usable model field's `(field, param_name, dest, flag, spec)`.
+    endpoint: Endpoint[Any], *, warn: bool = False
+) -> Iterator[tuple[EndpointParam, str, str, _ArgSpec]]:
+    """Yield each usable parameter's `(param, dest, flag, spec)`.
 
-    A field whose derived flag collides with a reserved CLI flag or one already yielded for an earlier field
-    of the same endpoint is renamed to a trailing-underscore alias (`--flag_`, trying one more `_` each time
-    that still collides, up to `_MAX_ALIAS_SUFFIX_LEN`) with a matching `param_name_` dest, rather than
-    dropped, so it stays reachable from the CLI. `dest` differs from `param_name` only for such an aliased
-    field: it is what the parser action is actually registered under, while `param_name` is what
-    `collect_call_kwargs()` must still key the real function call by. A `bool` field registers both
-    `--flag`/`--no-flag` (or their aliased form), so both forms are checked before the field is accepted.
+    A parameter whose derived flag collides with a reserved CLI flag or one already yielded for an earlier
+    parameter of the same endpoint is renamed to a trailing-underscore alias (`--flag_`, trying one more `_`
+    each time that still collides, up to `_MAX_ALIAS_SUFFIX_LEN`) with a matching `param_name_` dest, rather
+    than dropped, so it stays reachable from the CLI. `dest` differs from the parameter's own name only for
+    such an aliased parameter: it is what the parser action is actually registered under, while `param.name`
+    is what `collect_call_kwargs()` must still key the real function call by. A `bool` parameter registers
+    both `--flag`/`--no-flag` (or their aliased form), so both forms are checked before it's accepted.
 
-    A field is dropped outright, with no alias attempted, when its resolved parameter name itself collides
-    with a reserved argparse dest or control kwarg - renaming the flag can't fix this, since the value would
-    still reach the endpoint call a second time under the very keyword name it's dispatched under - when it
+    A parameter is dropped outright, with no alias attempted, when its resolved name itself collides with a
+    reserved argparse dest or control kwarg - renaming the flag can't fix this, since the value would still
+    reach the endpoint call a second time under the very keyword name it's dispatched under - when it
     resolves to the bare `--` option-terminator token, or on the rare case where even its own alias still
     collides.
 
-    A field whose type can't be mapped at all still gets a flag, falling back to a JSON-parsed one with no
-    displayed value type, rather than dropping the entire command over one parameter. A field with no
+    A parameter whose type can't be mapped at all still gets a flag, falling back to a JSON-parsed one with
+    no displayed value type, rather than dropping the entire command over one parameter. A parameter with no
     annotation at all reaches the same blank-column shape by its own dedicated route in `_arg_spec()`, since
     it never claimed a type to show, but still accepts a plain string when the value isn't valid JSON.
 
     Shared by two callers so both skip and rename identically: neither adds the flag to the parser under a
     dest the other wouldn't also read a value back from. Only the parser-building call passes `warn=True`,
-    so a skipped, aliased, or fallen-back field is logged once per parser build rather than on every
+    so a skipped, aliased, or fallen-back parameter is logged once per parser build rather than on every
     dispatched call.
 
-    :param endpoint: Endpoint whose parameter model to resolve
-    :param sig: Original endpoint function's signature, used to resolve each field back to its parameter name
-    :param warn: Log a diagnostic for each skipped, aliased, or fallen-back field. Only the parser-building
-                pass should set this
+    :param endpoint: Endpoint whose parameters to resolve
+    :param warn: Log a diagnostic for each skipped, aliased, or fallen-back parameter. Only the
+                parser-building pass should set this
     """
     seen_flags: set[str] = set()
     seen_dests: set[str] = set()
-    for name, field in endpoint.model.__dataclass_fields__.items():
-        param_name = resolve_signature_name(name, field.type, sig)
+    for param in endpoint.introspection.iter_params():
+        param_name = param.name
         flag = _flag_for(param_name)
         try:
-            spec = _arg_spec(field.type, flag)
+            spec = _arg_spec(param.annotation, flag)
         except Exception as e:
             if warn:
                 logger.warning(
                     f"{endpoint.api_class.__name__}.{endpoint.func_name}: Unable to determine a CLI type for "
-                    f"parameter {param_name!r} (annotation: {field.type!r}): {type(e).__name__}: {e}. Falling back "
-                    f"to a JSON-typed flag for this parameter."
+                    f"parameter {param_name!r} (annotation: {param.annotation!r}): {type(e).__name__}: {e}. "
+                    f"Falling back to a JSON-typed flag for this parameter."
                 )
             spec = _ArgSpec({"type": _parse_json}, None)
 
@@ -391,7 +380,7 @@ def _resolve_params(
 
         seen_flags.update(registered_flags)
         seen_dests.add(dest)
-        yield field, param_name, dest, flag, spec
+        yield param, dest, flag, spec
 
 
 def _next_free_alias(
@@ -456,7 +445,7 @@ def _arg_spec(annotation: Any, flag: str) -> _ArgSpec:
     :param flag: The parameter's own derived CLI flag, needed to special-case a `bool` whose flag already
                  starts with `--no-`
     """
-    base = _effective_type(annotation)
+    base, _ = param_type_util.unwrap_annotation(annotation)
     if base is inspect.Parameter.empty:
         return _ArgSpec({"type": _parse_json_or_str}, None)
     if base is bool:
@@ -470,8 +459,9 @@ def _arg_spec(annotation: Any, flag: str) -> _ArgSpec:
 
     origin = get_origin(base)
     if origin in (Union, UnionType):
-        # A genuine multi-type union. A single-non-None Optional was already unwrapped to its bare type above.
-        members = tuple(m for m in get_args(base) if m is not NoneType)
+        # A genuine multi-type union. A single-non-None Optional was already unwrapped to its bare type
+        # above, and unwrap_annotation() already dropped NoneType from a multi-member union too.
+        members = get_args(base)
         scalar_or_list_spec = _scalar_or_list_spec(members)
         if scalar_or_list_spec is not None:
             return scalar_or_list_spec
@@ -557,7 +547,7 @@ def _value_spec(annotation: Any, *, strict: bool = False) -> _ValueSpec | None:
         metavar = _TypeName.PATH.upper()
         return _ValueSpec(_existing_file, _TypeName.PATH, _Rank.FILE, {"metavar": metavar}, True, (_TypeName.PATH,))
 
-    base = _effective_type(annotation)
+    base, _ = param_type_util.unwrap_annotation(annotation)
     if base is bool:
         return _ValueSpec(_parse_bool, _TypeName.BOOL, _Rank.BOOL, {}, False, (_TypeName.BOOL,))
 
@@ -584,7 +574,9 @@ def _value_spec(annotation: Any, *, strict: bool = False) -> _ValueSpec | None:
             _format_choice_group_full(enum_members),
         )
     if origin in (Union, UnionType):
-        members = tuple(m for m in get_args(base) if m is not NoneType)
+        # A single-non-None Optional was already unwrapped to its bare type above, and
+        # unwrap_annotation() already dropped NoneType from a multi-member union too.
+        members = get_args(base)
         return _union_value_spec(members)
     if base in _SCALAR_TYPES:
         return _ValueSpec(base, base.__name__, _RANK_BY_SCALAR_TYPE[base], {}, False, (base.__name__,))
@@ -637,13 +629,12 @@ def _scalar_or_list_spec(members: tuple[Any, ...]) -> _ArgSpec | None:
 
     :param members: Union members, with `NoneType` already excluded
     """
-    list_indices = [
-        i for i, m in enumerate(members) if param_type_util.get_sequence_elem_type(_effective_type(m)) is not None
-    ]
+    elem_types = [param_type_util.get_sequence_elem_type(param_type_util.unwrap_annotation(m)[0]) for m in members]
+    list_indices = [i for i, elem_type in enumerate(elem_types) if elem_type is not None]
     if len(list_indices) != 1:
         return None
     (list_index,) = list_indices
-    elem_type = param_type_util.get_sequence_elem_type(_effective_type(members[list_index]))
+    elem_type = elem_types[list_index]
     scalar_members = tuple(m for i, m in enumerate(members) if i != list_index)
     if not scalar_members:
         return None
@@ -821,21 +812,6 @@ def _to_file(path: Path) -> File:
     # mypy misreads File as abstract because of its DataclassModel Protocol base. @dataclass supplies a concrete
     # __init__ at runtime.
     return File(path.name, path.read_bytes(), content_type)  # type: ignore[abstract]
-
-
-def _effective_type(annotation: Any) -> Any:
-    """Strip `Annotated[]` metadata and `Optional`/`T | None` wrapping down to the base type.
-
-    :param annotation: Type annotation to unwrap
-    """
-    origin = get_origin(annotation)
-    if origin is Annotated:
-        return _effective_type(get_args(annotation)[0])
-    if origin in (Union, UnionType):
-        non_none = [a for a in get_args(annotation) if a is not NoneType]
-        if len(non_none) == 1:
-            return _effective_type(non_none[0])
-    return annotation
 
 
 def _enum_converter(cls: type[Enum]) -> Callable[[str], Enum]:
@@ -1137,21 +1113,18 @@ def mark_accepts_file_indirection(action: argparse.Action) -> None:
 
 
 def _help_text(
-    endpoint: Endpoint[Any],
-    field: Field[Any],
+    param: EndpointParam,
     *,
-    required: bool,
     spec: _ArgSpec,
     type_width: int,
     renamed_from: str | None = None,
     description: str | None = None,
 ) -> str:
-    """Compose CLI help text for a single endpoint parameter field.
+    """Compose CLI help text for a single endpoint parameter.
 
-    :param endpoint: Endpoint object
-    :param field: Dataclass field describing the parameter
-    :param required: Whether the parameter is required
-    :param spec: The field's own resolved `_ArgSpec`, for its displayed value type (`display_type`) and
+    :param param: The parameter to describe, resolved from its model field back to the call it is
+                  dispatched by
+    :param spec: The parameter's own resolved `_ArgSpec`, for its displayed value type (`display_type`) and
                  whether it's JSON-parsed
     :param type_width: Width of the value-type column, shared by every parameter of the same endpoint so their
                        marker columns all align. `0` omits the column
@@ -1163,16 +1136,15 @@ def _help_text(
                         full under `--help`, clamped to that one line under `-h`, or `None` if the
                         docstring documents no such parameter
     """
-    location = endpoint_call_util.get_param_location(endpoint, field)
-    columns = _help_column(f"[{location}]", _LOCATION_COLUMN_WIDTH)
+    columns = _help_column(f"[{param.location}]", _LOCATION_COLUMN_WIDTH)
     if type_width:
         columns += _help_column(spec.display_type or "", type_width + 1, color_code=ColorCodes.DARK_GREY)
     markers = []
-    if required:
+    if param.required:
         markers.append(color_output("*required", color_code=ColorCodes.RED))
-    if not required and field.default not in (Unset, MISSING):
-        markers.append(f"(default: {_format_default(field.default, is_json=spec.is_json)})")
-    if param_type_util.is_deprecated_param(field.type):
+    if not param.required and param.has_default:
+        markers.append(f"(default: {_format_default(param.default, is_json=spec.is_json)})")
+    if param.deprecated:
         markers.append(color_output("(deprecated)", color_code=ColorCodes.YELLOW))
     if renamed_from is not None:
         markers.append(color_output(f"(renamed from {renamed_from}: CLI-reserved)", color_code=ColorCodes.YELLOW))

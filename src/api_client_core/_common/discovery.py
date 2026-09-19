@@ -112,7 +112,7 @@ def find_client(app_name: str) -> type[APIClient]:
         raise LookupError(message)
 
 
-def discover_resources(client_class: type[APIClient]) -> dict[str, type[BaseAPI[Any]]]:
+def discover_resources(client_class: type[APIClient], *, required: bool = False) -> dict[str, type[BaseAPI[Any]]]:
     """Discover every API class exposed on a client, keyed by its attribute name.
 
     Walks the client class's `cached_property`/`property` descriptors and keeps those whose resolved return
@@ -121,6 +121,9 @@ def discover_resources(client_class: type[APIClient]) -> dict[str, type[BaseAPI[
     instantiating the client, since discovery must never construct one.
 
     :param client_class: Concrete `APIClient` subclass to introspect
+    :param required: Raise `RuntimeError` instead of returning an empty dict when nothing is discovered.
+                     Both front ends (the CLI and the MCP server) treat an empty result as fatal and pass
+                     this so the check and its message live in one place
     """
     resources: dict[str, type[BaseAPI[Any]]] = {}
     seen: set[str] = set()
@@ -150,6 +153,12 @@ def discover_resources(client_class: type[APIClient]) -> dict[str, type[BaseAPI[
                     f"({return_type!r}) doesn't resolve to a BaseAPI subclass."
                 )
 
+    if not resources and required:
+        raise RuntimeError(
+            f"No API classes discovered on {client_class.__name__}. A resource must be exposed as a "
+            f"@cached_property/@property whose return type annotation is a BaseAPI subclass. If a resource module "
+            f"failed to import instead, re-run with --log-level DEBUG to see why."
+        )
     return resources
 
 

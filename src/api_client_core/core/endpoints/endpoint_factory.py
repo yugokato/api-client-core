@@ -54,9 +54,9 @@ class endpoint:
         >>> isinstance(client.auth.login, EndpointFunc) and isinstance(AuthAPI.login, EndpointFunc)
         True
         >>> client.auth.login.endpoint
-        Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>, method='post', path='/v1/auth/login', func_name='login', model=<class 'AuthAPILoginEndpointModel'>, url='https://api.my-app.com/v1/auth/login', content_type=None, is_public=False, is_documented=True, is_deprecated=False)
+        Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>, method='post', path='/v1/auth/login', func_name='login', model=<class 'AuthAPILoginEndpointModel'>, url='https://api.my-app.com/v1/auth/login', content_type=None, use_query_string=False, is_public=False, is_documented=True, is_deprecated=False)
         >>> AuthAPI.login.endpoint
-        Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>, method='post', path='/v1/auth/login', func_name='login', model=<class 'AuthAPILoginEndpointModel'>, url=None, content_type=None, is_public=False, is_documented=True, is_deprecated=False)
+        Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>, method='post', path='/v1/auth/login', func_name='login', model=<class 'AuthAPILoginEndpointModel'>, url=None, content_type=None, use_query_string=False, is_public=False, is_documented=True, is_deprecated=False)
         >>> str(client.auth.login.endpoint)
         'POST /v1/auth/login'
         >>> str(AuthAPI.login.endpoint)
@@ -311,11 +311,13 @@ class endpoint:
 
     @staticmethod
     def _create(
-        method: str, path: str, use_query_string: bool = False, **default_raw_options: Any
+        method: str, path: str, use_query_string: bool | None = None, **default_raw_options: Any
     ) -> Callable[[_OrigFunc[T, P, R]], EndpointHandler[P]]:
         """Returns an endpoint factory that creates an endpoint handler object, which will return an
         EndpointFunc object when accessing the associated API class function
         """
+        if use_query_string is None:
+            use_query_string = method == "get"
 
         def endpoint_factory(f: _OrigFuncOrPending[T, P, R]) -> EndpointHandler[P]:
             if isinstance(f, PendingOperations):

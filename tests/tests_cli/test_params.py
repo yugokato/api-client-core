@@ -2952,10 +2952,10 @@ class TestUnmappableParameterFallback:
         """
         real_help_text = params_module._help_text
 
-        def fake_help_text(endpoint: Any, field: Any, **kwargs: Any) -> str:
-            if field.name == "metadata":
+        def fake_help_text(param: Any, **kwargs: Any) -> str:
+            if param.name == "metadata":
                 raise RuntimeError("bad repr")
-            return real_help_text(endpoint, field, **kwargs)
+            return real_help_text(param, **kwargs)
 
         mocker.patch("api_client_core.cli.params._help_text", side_effect=fake_help_text)
         ep = widgets_api_class.create_widget.endpoint

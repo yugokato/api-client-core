@@ -191,6 +191,32 @@ def get_annotated_type(
         # TODO: Add more?
 
 
+def unwrap_annotation(annotation: Any) -> tuple[Any, bool]:
+    """Strip `Annotated[]` metadata and unwrap a nullable union down to its non-`None` member(s),
+    reporting whether `None` was among them.
+
+    The one place this unwrapping happens, so that every downstream leaf-type mapping over a resolved
+    parameter annotation works from the same notion of "unwrapped". The metadata predicates below
+    (`is_type_of()`, `is_query_param()`, `is_deprecated_param()`) unwrap `Annotated[]`/unions themselves
+    as part of their own search and must be given the raw annotation, not this function's result, or
+    they lose the metadata they're looking for.
+
+    :param annotation: Type annotation to unwrap
+    """
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return unwrap_annotation(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        args = get_args(annotation)
+        nullable = NoneType in args
+        non_none = tuple(a for a in args if a is not NoneType)
+        if len(non_none) == 1:
+            base, inner_nullable = unwrap_annotation(non_none[0])
+            return base, nullable or inner_nullable
+        return reduce(_or_, non_none), nullable
+    return annotation, False
+
+
 def get_sequence_elem_type(base: Any) -> Any | None:
     """Return the declared element type `X` for a homogeneous, repeatable-collection annotation - `list[X]`,
     `tuple[X, ...]`, `set[X]`, `frozenset[X]`, or `collections.abc.Sequence[X]` - or `None` for anything else,
@@ -198,14 +224,10 @@ def get_sequence_elem_type(base: Any) -> Any | None:
 
     An unparameterized collection (bare `list`, `tuple`, `set`, `frozenset`, or `Sequence`) is repeatable
     too, but declares no element type: it returns `inspect.Parameter.empty`, a caller's own sentinel for
-    "no type was declared here" (`cli/params.py`'s `_arg_spec()` and `mcp/schema.py`'s `_leaf_schema()`
-    both fall back to a lenient element parse for this case, rather than either a scalar `str` guess or a
-    single-JSON-document/opaque-object shape).
+    "no type was declared here", which a caller is expected to fall back to a lenient element parse for
+    rather than either a scalar `str` guess or a single-JSON-document/opaque-object shape.
 
-    `base` is expected to already be unwrapped (`Annotated[]`/nullable-union stripped) by the caller, since
-    the two consumers of this function each have their own notion of what "unwrapped" means. The CLI
-    discards nullability entirely, while the MCP schema generator tracks it separately, and neither
-    belongs here.
+    `base` is expected to already be unwrapped via `unwrap_annotation()` by the caller.
 
     :param base: Already-unwrapped annotation to inspect
     """

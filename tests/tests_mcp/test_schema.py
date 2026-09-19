@@ -214,19 +214,19 @@ class TestIterParamFields:
     """
 
     def test_yields_param_name_and_required_with_no_schema(self) -> None:
-        """Test that each yielded field carries its resolved param_name and required-ness, matching what
+        """Test that each yielded param carries its resolved name and required-ness, matching what
         build_input_schema() derives from the same walk, with no schema attached at all
         """
-        fields = {f.param_name: f for f in iter_param_fields(WidgetsAPI.create_widget.endpoint)}
-        assert fields["name"].required is True
-        assert fields["active"].required is False
-        assert not hasattr(fields["name"], "schema")
+        params = {p.name: p for p in iter_param_fields(WidgetsAPI.create_widget.endpoint)}
+        assert params["name"].required is True
+        assert params["active"].required is False
+        assert not hasattr(params["name"], "schema")
 
     def test_reserved_control_kwargs_are_skipped(self) -> None:
         """Test that a field resolving to a reserved control-kwarg name is skipped, matching
         build_input_schema()'s property set for the identical endpoint
         """
-        names = {f.param_name for f in iter_param_fields(CollisionAPI.make_thing.endpoint)}
+        names = {p.name for p in iter_param_fields(CollisionAPI.make_thing.endpoint)}
         assert names == {"name"}
 
     def test_skipped_reserved_kwarg_is_logged_under_warn(self, caplog: pytest.LogCaptureFixture) -> None:

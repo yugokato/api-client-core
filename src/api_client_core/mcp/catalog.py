@@ -115,13 +115,7 @@ def build_catalog(client_class: type[APIClient], options: ServerOptions) -> Endp
     if not app_name:
         raise RuntimeError(f"{client_class.__name__} has no 'app_name' class attribute set.")
 
-    resources = discover_resources(client_class)
-    if not resources:
-        raise RuntimeError(
-            f"No API classes discovered on {client_class.__name__}. A resource must be exposed as a "
-            f"@cached_property/@property whose return type annotation is a BaseAPI subclass. If a resource module "
-            f"failed to import instead, re-run with --log-level DEBUG to see why."
-        )
+    resources = discover_resources(client_class, required=True)
 
     if options.tool_prefix and not _normalize_name_part(options.tool_prefix):
         logger.warning(

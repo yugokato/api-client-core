@@ -1,8 +1,8 @@
-"""Unit tests for `api_client_core._common.docstring`"""
+"""Unit tests for `api_client_core.core.endpoints.utils.docstring`"""
 
 from __future__ import annotations
 
-from api_client_core._common.docstring import first_doc_line, split_param_docs
+from api_client_core.core.endpoints.utils.docstring import get_first_doc_line, split_param_docs
 
 
 class TestSplitParamDocs:
@@ -113,16 +113,16 @@ class TestFirstDocLine:
 
     def test_returns_none_for_no_docstring(self) -> None:
         """Test that a missing docstring returns None"""
-        assert first_doc_line(None) is None
+        assert get_first_doc_line(None) is None
 
     def test_returns_none_for_a_blank_docstring(self) -> None:
         """Test that a whitespace-only docstring returns None"""
-        assert first_doc_line("   \n  ") is None
+        assert get_first_doc_line("   \n  ") is None
 
     def test_returns_the_single_line_of_a_one_line_docstring(self) -> None:
         """Test that a one-line docstring returns itself, stripped"""
-        assert first_doc_line("  Just a summary.  ") == "Just a summary."
+        assert get_first_doc_line("  Just a summary.  ") == "Just a summary."
 
     def test_returns_only_the_first_line_of_a_multi_line_docstring(self) -> None:
         """Test that a multi-line docstring returns only its first line, not the rest"""
-        assert first_doc_line("Summary.\n\nMore detail below.") == "Summary."
+        assert get_first_doc_line("Summary.\n\nMore detail below.") == "Summary."

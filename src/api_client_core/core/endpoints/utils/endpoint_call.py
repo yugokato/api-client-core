@@ -150,20 +150,16 @@ def normalize_call_args(
 def get_param_location(endpoint: Endpoint[Any], field: Field[Any]) -> str:
     """Return the request location marker (`path`/`query`/`body`) for one endpoint parameter field.
 
-    Shared by the CLI (`cli/params.py`'s own `--help` text) and the MCP generator
-    (`mcp/schema.py`'s `x-location` schema property, `mcp/server.py`'s `describe_endpoint` payload):
-    both need the identical classification, and duplicating it risks the two silently drifting apart.
+    Backs `EndpointParam.location`, the one place this classification is derived, so every consumer that
+    turns an endpoint into a command or a tool description reaches the identical result rather than each
+    deriving its own and risking drift.
 
     :param endpoint: Endpoint object
     :param field: Dataclass field describing the parameter
     """
     if field.metadata.get("path") is True:
         return "path"
-    if (
-        endpoint.method == "get"
-        or endpoint.model.endpoint_func._use_query_string
-        or param_type_util.is_query_param(field.type)
-    ):
+    if endpoint.method == "get" or endpoint.use_query_string or param_type_util.is_query_param(field.type):
         return "query"
     return "body"
 

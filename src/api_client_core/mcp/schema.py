@@ -1,7 +1,7 @@
 """JSON Schema layer: `Endpoint` -> MCP tool input schema, description, and safety annotations.
 
-`unwrap_annotation()` preserves `T | None` nullability as a JSON Schema `anyOf ... null` branch, since an
-explicit `null` can be a meaningful wire value some endpoints require.
+`param_type_util.unwrap_annotation()` preserves `T | None` nullability as a JSON Schema `anyOf ... null`
+branch, since an explicit `null` can be a meaningful wire value some endpoints require.
 """
 
 from __future__ import annotations
@@ -9,23 +9,19 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Iterator
-from dataclasses import MISSING, Field
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
-from types import NoneType, UnionType
-from typing import Annotated, Any, Literal, NamedTuple, Union, get_args, get_origin
+from types import UnionType
+from typing import Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
 from common_libs.logging import get_logger
 
-from api_client_core._common.docstring import first_doc_line, split_param_docs
-
-from ..core.endpoints import Endpoint
-from ..core.endpoints.utils import endpoint_call as endpoint_call_util
+from ..core.endpoints import Endpoint, EndpointParam
 from ..core.endpoints.utils import param_type as param_type_util
-from ..core.endpoints.utils.endpoint_model import get_reserved_param_names, resolve_signature_name
-from ..core.types import File, Unset
+from ..core.endpoints.utils.endpoint_model import get_reserved_param_names
+from ..core.types import File
 from ._constants import CALL_WRAPPERS_KEY, DESTRUCTIVE_METHODS, IDEMPOTENT_METHODS, READ_ONLY_METHODS
 from .catalog import ServerOptions
 from .wrappers import call_wrappers_schema
@@ -42,46 +38,28 @@ _RESERVED_PARAM_NAMES: frozenset[str] = frozenset(get_reserved_param_names()) | 
 _NO_DEFAULT = object()
 
 
-class ParamField(NamedTuple):
-    """One endpoint parameter field, resolved to its real signature name and required-ness, with no
-    schema attached - for a caller that only needs to know which parameters exist, not their schema.
+def iter_param_fields(endpoint: Endpoint[Any], *, warn: bool = False) -> Iterator[EndpointParam]:
+    """Yield an `EndpointParam` for each of an endpoint's usable parameters, building no schema at all.
 
-    :param field: The model's dataclass field
-    :param param_name: The real signature parameter name (post-`Alias` resolution)
-    :param required: Whether the parameter is required, per the original signature
-    """
-
-    field: Field[Any]
-    param_name: str
-    required: bool
-
-
-def iter_param_fields(endpoint: Endpoint[Any], *, warn: bool = False) -> Iterator[ParamField]:
-    """Yield a `ParamField` for each of an endpoint's usable model fields, building no schema at all.
-
-    A field resolving to a reserved control-kwarg name (`quiet`/`with_hooks`/`raw_options`) is skipped
+    A parameter resolving to a reserved control-kwarg name (`quiet`/`with_hooks`/`raw_options`) is skipped
     outright, since passing one through would collide with the keyword the dispatcher already supplies it
     under. Split out from schema construction so argument coercion, on every tool dispatch, never pays
     for building a JSON Schema fragment per parameter just to throw it away.
 
-    :param endpoint: Endpoint whose parameter model to walk
-    :param warn: Log a diagnostic for each skipped reserved-name field. Only a schema-publication pass
+    :param endpoint: Endpoint whose parameters to walk
+    :param warn: Log a diagnostic for each skipped reserved-name parameter. Only a schema-publication pass
                 should set this, not one that merely reads parameters back for argument coercion
     """
-    sig = endpoint_call_util.get_params_signature(endpoint.original_func)
-    for name, field in endpoint.model.__dataclass_fields__.items():
-        param_name = resolve_signature_name(name, field.type, sig)
-        if param_name in _RESERVED_PARAM_NAMES:
+    for param in endpoint.introspection.iter_params():
+        if param.name in _RESERVED_PARAM_NAMES:
             if warn:
                 logger.debug(
-                    f"{endpoint.api_class.__name__}.{endpoint.func_name}: Parameter {param_name!r} is reserved "
+                    f"{endpoint.api_class.__name__}.{endpoint.func_name}: Parameter {param.name!r} is reserved "
                     f"for MCP dispatch and is never reachable through this tool. Start the server with "
                     f"--log-level DEBUG to see this again."
                 )
             continue
-        sig_param = sig.parameters.get(param_name)
-        required = sig_param is not None and sig_param.default is inspect.Parameter.empty
-        yield ParamField(field=field, param_name=param_name, required=required)
+        yield param
 
 
 def build_input_schema(
@@ -100,42 +78,41 @@ def build_input_schema(
     :param warn: Log a diagnostic for each skipped or unmapped parameter
     :param with_call_wrappers: Nest the reserved `call_wrappers` property (static mode only)
     """
-    _, param_docs = split_param_docs(endpoint.original_func.__doc__)
+    param_docs = endpoint.introspection.param_docs
     properties: dict[str, Any] = {}
     required: list[str] = []
-    for field, param_name, param_required in iter_param_fields(endpoint, warn=warn):
+    for param in iter_param_fields(endpoint, warn=warn):
         try:
-            prop_schema = _schema_for_annotation(field.type, options)
+            prop_schema = _schema_for_annotation(param.annotation, options)
         except Exception as e:
             if warn:
                 logger.warning(
                     f"{endpoint.api_class.__name__}.{endpoint.func_name}: Unable to determine a JSON schema for "
-                    f"parameter {param_name!r} (annotation: {field.type!r}): {type(e).__name__}: {e}. Falling back "
-                    f"to an unconstrained schema for this parameter."
+                    f"parameter {param.name!r} (annotation: {param.annotation!r}): {type(e).__name__}: {e}. "
+                    f"Falling back to an unconstrained schema for this parameter."
                 )
             prop_schema = {}
-        if field.default is None and not _is_nullable_schema(prop_schema):
+        if param.default is None and not _is_nullable_schema(prop_schema):
             # The common `def f(self, name: str = None)` pattern: the annotation itself isn't nullable,
             # but the default already is, so the schema is widened to match.
             prop_schema = _merge_null(prop_schema)
 
-        deprecated = param_type_util.is_deprecated_param(field.type)
-        description = param_docs.get(param_name)
-        if deprecated:
+        description = param_docs.get(param.name)
+        if param.deprecated:
             description = f"(deprecated) {description}" if description else "(deprecated)"
-        if not param_required and field.default not in (Unset, MISSING):
-            default = _format_default(field.default)
+        if not param.required and param.has_default:
+            default = _format_default(param.default)
             if default is not _NO_DEFAULT:
                 prop_schema = {**prop_schema, "default": default}
-        if deprecated:
+        if param.deprecated:
             prop_schema = {**prop_schema, "deprecated": True}
         if description:
             prop_schema = {**prop_schema, "description": description}
-        prop_schema = {**prop_schema, "x-location": endpoint_call_util.get_param_location(endpoint, field)}
+        prop_schema = {**prop_schema, "x-location": param.location}
 
-        properties[param_name] = prop_schema
-        if param_required:
-            required.append(param_name)
+        properties[param.name] = prop_schema
+        if param.required:
+            required.append(param.name)
 
     if with_call_wrappers:
         properties[CALL_WRAPPERS_KEY] = call_wrappers_schema()
@@ -155,7 +132,7 @@ def tool_description(endpoint: Endpoint[Any]) -> str:
 
     :param endpoint: Endpoint to describe
     """
-    prose, _ = split_param_docs(endpoint.original_func.__doc__)
+    prose = endpoint.introspection.description
     text = f"{prose}\n\nHTTP: {endpoint}" if prose else str(endpoint)
     if endpoint.is_deprecated:
         text += f"\n\nDEPRECATED: {endpoint} is deprecated."
@@ -169,8 +146,7 @@ def tool_title(endpoint: Endpoint[Any]) -> str:
 
     :param endpoint: Endpoint to title
     """
-    prose, _ = split_param_docs(endpoint.original_func.__doc__)
-    return first_doc_line(prose) or str(endpoint)
+    return endpoint.introspection.summary or str(endpoint)
 
 
 def annotations_for(method: str) -> dict[str, bool]:
@@ -190,38 +166,13 @@ def annotations_for(method: str) -> dict[str, bool]:
     }
 
 
-def unwrap_annotation(annotation: Any) -> tuple[Any, bool]:
-    """Strip `Annotated[]` metadata and unwrap a nullable union down to its non-`None` member(s),
-    reporting whether `None` was among them.
-
-    :param annotation: Type annotation to unwrap
-    """
-    origin = get_origin(annotation)
-    if origin is Annotated:
-        return unwrap_annotation(get_args(annotation)[0])
-    if origin in (Union, UnionType):
-        args = get_args(annotation)
-        nullable = NoneType in args
-        non_none = tuple(a for a in args if a is not NoneType)
-        if not non_none:
-            return NoneType, True
-        if len(non_none) == 1:
-            base, inner_nullable = unwrap_annotation(non_none[0])
-            return base, nullable or inner_nullable
-        rebuilt: Any = non_none[0]
-        for member in non_none[1:]:
-            rebuilt = rebuilt | member
-        return rebuilt, nullable
-    return annotation, False
-
-
 def _schema_for_annotation(annotation: Any, options: ServerOptions) -> dict[str, Any]:
     """Map a resolved parameter type annotation to a JSON Schema fragment.
 
     :param annotation: Resolved type annotation of one endpoint parameter field
     :param options: Resolved server options (threaded through for File handling)
     """
-    base, nullable = unwrap_annotation(annotation)
+    base, nullable = param_type_util.unwrap_annotation(annotation)
     core = _leaf_schema(base, options)
     return _merge_null(core) if nullable else core
 
