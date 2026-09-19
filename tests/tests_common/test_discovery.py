@@ -94,6 +94,36 @@ class TestDiscoverResources:
         matching_calls = [call for call in mock_log.warning.call_args_list if "gadgets" in call[0][0]]
         assert len(matching_calls) == 1
 
+    def test_discover_resources_returns_an_empty_dict_by_default_when_nothing_is_discovered(self) -> None:
+        """Test that discover_resources() returns an empty dict, rather than raising, when required=False
+        (the default) and the client exposes no resources
+        """
+
+        class EmptyClient(APIClient):
+            app_name = "empty-test"
+
+        assert discover_resources(EmptyClient) == {}
+
+    def test_discover_resources_raises_when_required_and_nothing_is_discovered(self) -> None:
+        """Test that discover_resources(required=True) raises RuntimeError naming the client, rather than
+        returning an empty dict, when the client exposes no resources
+        """
+
+        class EmptyClient(APIClient):
+            app_name = "empty-test"
+
+        with pytest.raises(RuntimeError, match="No API classes discovered on EmptyClient"):
+            discover_resources(EmptyClient, required=True)
+
+    def test_discover_resources_does_not_raise_when_required_and_resources_exist(
+        self, cli_client_class: type[CliTestClient]
+    ) -> None:
+        """Test that discover_resources(required=True) returns the discovered resources normally when the
+        client exposes at least one
+        """
+        resources = discover_resources(cli_client_class, required=True)
+        assert "widgets" in resources
+
 
 class TestEndpointsFor:
     """Tests for `endpoints_for()`"""

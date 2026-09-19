@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from api_client_core._common.docstring import first_doc_line
+from api_client_core.core.endpoints.utils.docstring import get_first_doc_line
 
 from ._constants import (
     CALL_WRAPPERS_KEY,
@@ -235,7 +235,7 @@ def _resource_summary_payload(catalog: EndpointCatalog) -> dict[str, Any]:
         {
             "resource": name,
             "endpoint_count": len(entries),
-            "summary": first_doc_line(entries[0].api_class.__doc__),
+            "summary": get_first_doc_line(entries[0].api_class.__doc__),
             "methods": sorted({e.endpoint.method for e in entries}),
         }
         for name, entries in sorted(catalog.resources.items())

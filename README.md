@@ -648,18 +648,19 @@ When both decorators and hooks are configured, the full request lifecycle runs i
 
 `Endpoint` is a frozen `dataclass` holding all metadata for a single endpoint. It is exposed on every endpoint function as `.endpoint` and to each API class via its `.endpoints` list.
 
-| Field           | Type                  | Description                                                                    |
-|-----------------|-----------------------|--------------------------------------------------------------------------------|
-| `api_class`     | `type[BaseAPI]`       | The API class that owns this endpoint.                                         |
-| `method`        | `str`                 | HTTP method in lowercase (e.g., `"get"`, `"post"`).                            |
-| `path`          | `str`                 | Endpoint path (e.g., `"/auth/login"`).                                         |
-| `func_name`     | `str`                 | Name of the original API class function.                                       |
-| `model`         | `type[EndpointModel]` | Dynamically generated `dataclass` model describing this endpoint's parameters. |
-| `url`           | `str \| None`         | Full URL. Only set when accessed via a client instance (not via the class).    |
-| `content_type`  | `str \| None`         | Explicitly set Content-Type, or `None` to auto-detect.                         |
-| `is_public`     | `bool`                | `True` if the endpoint does not require authentication.                        |
-| `is_documented` | `bool`                | `True` by default. `False` if the endpoint is marked `@endpoint.undocumented`. |
-| `is_deprecated` | `bool`                | `True` if the endpoint was marked `@endpoint.is_deprecated`.                   |
+| Field              | Type                  | Description                                                                    |
+|--------------------|-----------------------|--------------------------------------------------------------------------------|
+| `api_class`        | `type[BaseAPI]`       | The API class that owns this endpoint.                                         |
+| `method`           | `str`                 | HTTP method in lowercase (e.g., `"get"`, `"post"`).                            |
+| `path`             | `str`                 | Endpoint path (e.g., `"/auth/login"`).                                         |
+| `func_name`        | `str`                 | Name of the original API class function.                                       |
+| `model`            | `type[EndpointModel]` | Dynamically generated `dataclass` model describing this endpoint's parameters. |
+| `url`              | `str \| None`         | Full URL. Only set when accessed via a client instance (not via the class).    |
+| `content_type`     | `str \| None`         | Explicitly set Content-Type, or `None` to auto-detect.                         |
+| `use_query_string` | `bool`                | `True` if all parameters are forced to send as a query string.                 |
+| `is_public`        | `bool`                | `True` if the endpoint does not require authentication.                        |
+| `is_documented`    | `bool`                | `True` by default. `False` if the endpoint is marked `@endpoint.undocumented`. |
+| `is_deprecated`    | `bool`                | `True` if the endpoint was marked `@endpoint.is_deprecated`.                   |
 
 `str(endpoint)` returns `"METHOD /path"` (e.g., `"POST /auth/login"`).
 
@@ -674,6 +675,7 @@ Endpoint(api_class=<class 'myproject.clients.my_app.api.auth.AuthAPI'>,
          model=<class 'AuthAPILoginEndpointModel'>,
          url='https://api.example.com/auth/login',
          content_type=None,
+         use_query_string=False,
          is_public=True,
          is_documented=True,
          is_deprecated=False)

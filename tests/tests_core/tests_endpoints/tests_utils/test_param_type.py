@@ -302,3 +302,40 @@ class TestSequenceElemType:
     def test_a_parameterized_collection_returns_its_element_type(self, annotation: Any, elem_type: Any) -> None:
         """Test that a parameterized homogeneous collection returns its declared element type"""
         assert param_type_util.get_sequence_elem_type(annotation) is elem_type
+
+
+class TestUnwrapAnnotation:
+    """Tests for `unwrap_annotation()`: stripping `Annotated[]` metadata and unwrapping a nullable union
+    down to its non-`None` member(s), while reporting whether `None` was among them
+    """
+
+    def test_a_plain_annotation_is_returned_unchanged_and_not_nullable(self) -> None:
+        """Test that an annotation with no `Annotated[]`/union wrapping at all passes through unchanged"""
+        assert param_type_util.unwrap_annotation(str) == (str, False)
+
+    def test_annotated_metadata_is_stripped(self) -> None:
+        """Test that `Annotated[]` metadata is stripped down to the wrapped type"""
+        assert param_type_util.unwrap_annotation(Annotated[str, "query"]) == (str, False)
+
+    def test_a_single_member_optional_unwraps_to_its_bare_type_and_reports_nullable(self) -> None:
+        """Test that `T | None` unwraps to `T`, reporting nullability"""
+        assert param_type_util.unwrap_annotation(str | None) == (str, True)
+
+    def test_a_non_nullable_multi_member_union_rebuilds_without_none(self) -> None:
+        """Test that a multi-member union with no `None` rebuilds to the same members, not nullable"""
+        base, nullable = param_type_util.unwrap_annotation(int | str)
+        assert set(typing.get_args(base)) == {int, str}
+        assert nullable is False
+
+    def test_a_nullable_multi_member_union_rebuilds_without_none_and_reports_nullable(self) -> None:
+        """Test that a multi-member union with `None` rebuilds to its non-`None` members, reporting
+        nullability, so a caller never sees `NoneType` among the rebuilt union's own args
+        """
+        base, nullable = param_type_util.unwrap_annotation(int | str | None)
+        assert typing.get_args(base) and type(None) not in typing.get_args(base)
+        assert set(typing.get_args(base)) == {int, str}
+        assert nullable is True
+
+    def test_annotated_wrapping_a_nullable_union_unwraps_both_layers(self) -> None:
+        """Test that `Annotated[]` wrapping a nullable union unwraps through both layers in one call"""
+        assert param_type_util.unwrap_annotation(Annotated[str | None, "query"]) == (str, True)

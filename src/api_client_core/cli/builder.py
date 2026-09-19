@@ -12,9 +12,9 @@ from common_libs.ansi_colors import ColorCodes
 from common_libs.logging import get_logger
 
 from api_client_core import __version__
-from api_client_core._common.docstring import first_doc_line, split_param_docs
 from api_client_core.core.base import APIClient
 from api_client_core.core.endpoints import Endpoint
+from api_client_core.core.endpoints.utils.docstring import get_first_doc_line
 
 from .._common.console import LOG_LEVELS
 from .._common.discovery import (
@@ -67,7 +67,7 @@ def build_initial_parser() -> argparse.ArgumentParser:
     parser.add_argument(Flag.VERSION, action="version", version=f"{PROG} {__version__}")
     subparsers = parser.add_subparsers(metavar="<app-name>", help="app_name set in your API client")
     for app_name, client_class in sorted(result.clients.items(), key=lambda item: _natural_sort_key(item[0])):
-        help_text = first_doc_line(client_class.__doc__) or f"{client_class.__name__} commands"
+        help_text = get_first_doc_line(client_class.__doc__) or f"{client_class.__name__} commands"
         subparsers.add_parser(app_name, help=help_text)
     return parser
 
@@ -89,13 +89,7 @@ def build_client_parser(client_class: type[APIClient], *, prog: str | None = Non
     _add_common_arguments(parser, default=None)
     parser.set_defaults(_parser=parser)
 
-    resources = discover_resources(client_class)
-    if not resources:
-        raise RuntimeError(
-            f"No API classes discovered on {client_class.__name__}. A resource must be exposed as a "
-            f"@cached_property/@property whose return type annotation is a BaseAPI subclass. If a resource module "
-            f"failed to import instead, re-run with --log-level DEBUG to see why."
-        )
+    resources = discover_resources(client_class, required=True)
 
     # Not required: a resource/command given with nothing after it still parses successfully, so run()
     # can show that level's own help (naming its choices) instead of argparse's bare "arguments are
@@ -116,7 +110,7 @@ def build_client_parser(client_class: type[APIClient], *, prog: str | None = Non
             continue
         resource_parser = resource_subparsers.add_parser(
             resource_name,
-            help=first_doc_line(api_class.__doc__) or f"{api_class.__name__} commands",
+            help=get_first_doc_line(api_class.__doc__) or f"{api_class.__name__} commands",
             description=_generate_description(api_class),
             tips=tips,
         )
@@ -134,10 +128,9 @@ def build_client_parser(client_class: type[APIClient], *, prog: str | None = Non
                 )
                 continue
             try:
-                prose, _ = split_param_docs(endpoint.original_func.__doc__)
                 command_parser = command_subparsers.add_parser(
                     command_name,
-                    help=_command_help(endpoint, prose),
+                    help=_command_help(endpoint),
                     description=_generate_description(endpoint),
                     add_help=False,
                     tips=tips,
@@ -554,14 +547,12 @@ def _format_action_usage(action: argparse.Action) -> str:
     return part if action.required else f"[{part}]"
 
 
-def _command_help(endpoint: Endpoint[Any], doc: str | None) -> str:
+def _command_help(endpoint: Endpoint[Any]) -> str:
     """Compose the one-line help summary shown for an endpoint's command in its resource's `--help`.
 
     :param endpoint: Endpoint the command was generated for
-    :param doc: The endpoint function's own docstring prose (its `:param` entries already split out by
-                `split_param_docs()`), if any
     """
-    summary = first_doc_line(doc) or str(endpoint)
+    summary = endpoint.introspection.summary or str(endpoint)
     if endpoint.is_deprecated:
         summary += color_output(" (deprecated)", color_code=ColorCodes.YELLOW)
     return summary
@@ -656,7 +647,7 @@ def _generate_description(obj: Endpoint[Any] | type[Any]) -> str:
     """
     if isinstance(obj, Endpoint):
         desc = str(obj)
-        doc, _ = split_param_docs(obj.original_func.__doc__)
+        doc = obj.introspection.description
     else:
         desc = f"{obj.__name__}"
         doc = cleandoc(obj.__doc__) if obj.__doc__ else ""

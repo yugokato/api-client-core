@@ -57,7 +57,6 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
         self._instance = instance
         self._owner = owner
         self._original_func: Callable[..., RestResponse] = endpoint_handler.original_func
-        self._use_query_string = endpoint_handler.use_query_string
         self._raw_options = endpoint_handler.default_raw_options
         self._model: type[EndpointModel] | None = None
 
@@ -76,6 +75,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
                 model=self.model,
                 url=f"{self.rest_client.base_url.rstrip('/')}/{self.path.lstrip('/')}" if instance else None,
                 content_type=endpoint_handler.content_type,
+                use_query_string=endpoint_handler.use_query_string,
                 is_public=endpoint_handler.is_public,
                 is_documented=owner.is_documented and endpoint_handler.is_documented,
                 is_deprecated=owner.is_deprecated or endpoint_handler.is_deprecated,
@@ -221,7 +221,7 @@ class EndpointFunc(CallWrapperMixin[P], metaclass=_QualNameReprMeta):
             {**sig_defaults, **body_or_query_params},
             self.rest_client.client.headers,
             quiet=quiet,
-            use_query_string=self._use_query_string,
+            use_query_string=self.endpoint.use_query_string,
             **self._raw_options | (raw_options or {}),
         )
 

@@ -133,7 +133,7 @@ def run(
         with client:
             call_kwargs = collect_call_kwargs(endpoint, args)
             try:
-                call_args, call_kwargs = normalize_call_args(endpoint.original_func, (), call_kwargs)
+                call_args, call_kwargs = normalize_call_args(endpoint.introspection.original_func, (), call_kwargs)
             except TypeError as e:
                 write_error(e)
                 return 2
@@ -200,9 +200,7 @@ def _resolve_call(endpoint: Endpoint[Any], client: APIClient, args: argparse.Nam
     """
     if not any_wrapper_given(args):
         return partial(endpoint, client)
-    api_class = endpoint.api_class(client)
-    endpoint_func = getattr(api_class, endpoint.func_name)
-    return apply_wrappers(endpoint_func, args)
+    return apply_wrappers(endpoint.bind(client), args)
 
 
 def _write_output(result: RestResponse | list[Any], output: str) -> None:
