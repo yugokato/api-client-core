@@ -364,7 +364,7 @@ wheels = [
 [[package]]
 name = "common-libs"
 version = "0.0.0"
-source = { git = "https://github.com/yugokato/common-libs#9a1693754cadbb65a72d4a5f253a9ddcdc024c3b" }
+source = { git = "https://github.com/yugokato/common-libs#f3f7409559b160e3fd55ef73c455f40726d0534b" }
 dependencies = [
     { name = "filelock" },
     { name = "python-dotenv" },
