@@ -178,7 +178,7 @@ Define one API class for each logical group (e.g. OpenAPI tag) by subclassing `B
 from typing import Annotated, Unpack
 
 from api_client_core import BaseAPI, endpoint
-from api_client_core.types import Kwargs, RestResponse, Query, Unset
+from api_client_core.types import Kwargs, Query, RestResponse, Unset
 
 
 class AuthAPI(BaseAPI):
@@ -1074,7 +1074,7 @@ The framework sends `"user-id"` as the actual key in the request payload while t
 Every public type has a single import home at `api_client_core.types`:
 
 ```python
-from api_client_core.types import RestResponse, Kwargs, Unset, Query, Alias
+from api_client_core.types import Alias, Kwargs, Query, RestResponse, Unset
 ```
 
 **Endpoint-authoring types** — used when writing endpoint functions and their signatures:
