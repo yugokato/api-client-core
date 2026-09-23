@@ -9,6 +9,29 @@ API Client Core — A Framework for Building AI-Ready Python API Clients
 
 From the same endpoint definitions, the framework also automatically generates CLI commands and MCP tools, along with an MCP server, allowing every endpoint to be invoked programmatically, from the terminal, or by AI agents through an MCP client such as Claude Code.
 
+```mermaid
+flowchart LR
+    E(["`**@endpoint** definition`"])
+
+    E -.-> P["`**Python API**<br/>(sync/async)`"]
+    E -.-> C["`**CLI**<br/>(command)`"]
+    E -.-> M["`**MCP Tool**<br/>(static/dynamic)`"]
+
+    subgraph I["Interfaces"]
+        direction TB
+        P
+        C
+        subgraph MCP["MCP Server"]
+            M
+        end
+    end
+
+    P --> F{{"EndpointFunc"}}
+    C --> F
+    M --> F
+    F -->|"__call__()"| H["HTTP"]
+```
+
 It uses the [httpx2](https://github.com/pydantic/httpx2)-based REST client from [common-libs](https://github.com/yugokato/common-libs/tree/main/src/common_libs/clients/rest_client) as the underlying HTTP client.
 
 
