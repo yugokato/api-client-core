@@ -32,6 +32,7 @@ from ._constants import (
     INCLUDED_HEADERS,
     MAX_HEADER_VALUE_CHARS,
     MAX_RESULT_BYTES,
+    MAX_SUMMARY_FAILURE_DETAILS,
     TRUNCATION_PREVIEW_CHARS,
     Mode,
     ResponseFormat,
@@ -545,7 +546,12 @@ def _exception_detail(exc: BaseException) -> str:
 
 
 def _list_summary(items: list[Any], ok_flags: list[bool]) -> str:
-    """A one-line summary of a multi-call result, deduplicating identical failure details.
+    """A one-line summary of a multi-call result, deduplicating identical failure details and capping how
+    many distinct ones are shown.
+
+    The cap matters because this line is prepended outside `MAX_RESULT_BYTES`. A `with_max_response_time()`
+    assertion chained under a large `with_repeat()`/`with_concurrency()` group can otherwise produce one
+    distinct message per call, growing the summary unboundedly with the call count.
 
     :param items: The list items
     :param ok_flags: Per-item success flags, aligned with `items`
@@ -555,14 +561,24 @@ def _list_summary(items: list[Any], ok_flags: list[bool]) -> str:
     if not failed:
         return f"All {total} call(s) succeeded."
     details = list(dict.fromkeys(_failure_brief(item) for item in failed))
-    return f"{len(failed)} of {total} call(s) failed: {'; '.join(details)}"
+    shown, remaining = details[:MAX_SUMMARY_FAILURE_DETAILS], len(details) - MAX_SUMMARY_FAILURE_DETAILS
+    summary = f"{len(failed)} of {total} call(s) failed: {'; '.join(shown)}"
+    if remaining > 0:
+        summary += f"; and {remaining} more distinct failure(s)"
+    return summary
 
 
 def _failure_brief(item: Any) -> str:
-    """A compact, request-id-free failure label for `_list_summary()`'s deduplication.
+    """A compact, request-id-free failure label used to deduplicate a multi-call summary.
+
+    A captured `HTTPStatusError` is unwrapped to its response first, so it falls through to the same
+    branch as a plain failed response rather than rendering through a formatter that includes a per-call
+    request ID and would defeat deduplication.
 
     :param item: A failed `RestResponse` or a captured `BaseException`
     """
+    if isinstance(item, HTTPStatusError):
+        item = item.response
     if isinstance(item, BaseException):
         return _exception_detail(item)
     return f"HTTP {item.status_code}"
@@ -634,10 +650,15 @@ def _render_full_payload(response: RestResponse, options: ServerOptions, *, extr
     :param options: Resolved server options
     :param extra: Extra top-level keys (e.g. a `stats` block) to merge into the envelope
     """
+    raw_body = response.response
+    # The generic "envelope too big, truncate body" step a few lines down must be skipped for an oversized
+    # binary body, since that body is already replaced below with a small truncation marker. Applying that
+    # step anyway would re-wrap the already-small marker in a second, nested one.
+    body_already_truncated = _is_oversized_binary(raw_body)
     payload: dict[str, Any] = {
         "status_code": response.status_code,
         "headers": _filtered_headers(response, options),
-        "body": _json_safe_body(response.response),
+        "body": _json_safe_body(raw_body),
     }
     if extra:
         payload.update(extra)
@@ -646,11 +667,12 @@ def _render_full_payload(response: RestResponse, options: ServerOptions, *, extr
     if size <= MAX_RESULT_BYTES:
         return content
 
-    body_preview = json.dumps(payload["body"], default=str, indent=2)
-    payload["body"] = _truncation_marker(content, size, preview_source=body_preview)
-    content = json.dumps(payload, default=str, indent=2)
-    if len(content.encode()) <= MAX_RESULT_BYTES:
-        return content
+    if not body_already_truncated:
+        body_preview = json.dumps(payload["body"], default=str, indent=2)
+        payload["body"] = _truncation_marker(content, size, preview_source=body_preview)
+        content = json.dumps(payload, default=str, indent=2)
+        if len(content.encode()) <= MAX_RESULT_BYTES:
+            return content
 
     # Only reachable when headers alone (typically via --all-headers) are what pushed the envelope
     # over the cap, since body was already replaced with a small, fixed-size marker above.
@@ -658,18 +680,41 @@ def _render_full_payload(response: RestResponse, options: ServerOptions, *, extr
     return json.dumps(payload, default=str, indent=2)
 
 
+def _base64_encoded_len(n: int) -> int:
+    """Return the exact length of `n` bytes' base64 encoding, without encoding them.
+
+    :param n: Number of raw bytes
+    """
+    return 4 * ((n + 2) // 3)
+
+
+def _is_oversized_binary(body: Any) -> bool:
+    """Return whether `body` is raw `bytes` whose base64 encoding alone would already exceed the result
+    size cap, before it's ever rendered.
+
+    :param body: A response body, before it's converted to a JSON-safe value
+    """
+    return isinstance(body, bytes) and _base64_encoded_len(len(body)) > MAX_RESULT_BYTES
+
+
 def _json_safe_body(body: Any) -> Any:
     """Return a response body as a JSON-safe value.
 
     A JSON-decoded body passes through unchanged. Raw `bytes` (a binary body that didn't decode as JSON
     or valid UTF-8 text) is base64-encoded instead, with an `encoding` marker distinguishing it from an
-    ordinary JSON-decoded object.
+    ordinary JSON-decoded object. When the body's base64 form alone would already exceed the result size
+    cap, only a preview-sized prefix is encoded and a truncation marker is returned directly, rather than
+    encoding the whole (possibly huge) body just to discard most of it a moment later.
 
     :param body: The response's already-decoded body
     """
-    if isinstance(body, bytes):
-        return {"content_base64": base64.b64encode(body).decode("ascii"), "encoding": "base64"}
-    return body
+    if not isinstance(body, bytes):
+        return body
+    if _is_oversized_binary(body):
+        preview_b64 = base64.b64encode(body[:TRUNCATION_PREVIEW_CHARS]).decode("ascii")
+        preview = json.dumps({"content_base64": preview_b64, "encoding": "base64"}, default=str, indent=2)
+        return _truncation_marker(preview, len(body))
+    return {"content_base64": base64.b64encode(body).decode("ascii"), "encoding": "base64"}
 
 
 def _render_bounded_body(body: Any) -> str:
@@ -690,7 +735,8 @@ def _truncation_marker(rendered: str, size: int, *, preview_source: str | None =
     `structuredContent` regardless of the original body's shape.
 
     :param rendered: The JSON text the caller already produced for the oversized payload
-    :param size: The actual rendered size that triggered truncation, in bytes
+    :param size: The size, in bytes, that triggered truncation. Either the rendered envelope's size, or a
+                 binary body's own byte count, known before any rendering was needed
     :param preview_source: Text to slice the preview from instead of `rendered`, when the two differ (a
                 caller whose text leads with other keys before the one being replaced)
     """

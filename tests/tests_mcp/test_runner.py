@@ -18,15 +18,25 @@ from pytest_mock import MockerFixture
 from api_client_core import APIClient, BaseAPI, endpoint
 from api_client_core._common.discovery import discover_resources
 from api_client_core.core.endpoints import Endpoint
-from api_client_core.mcp._constants import MAX_HEADER_VALUE_CHARS, MAX_RESULT_BYTES, Mode, ResponseFormat
+from api_client_core.mcp._constants import (
+    MAX_HEADER_VALUE_CHARS,
+    MAX_RESULT_BYTES,
+    MAX_SUMMARY_FAILURE_DETAILS,
+    TRUNCATION_PREVIEW_CHARS,
+    Mode,
+    ResponseFormat,
+)
 from api_client_core.mcp.catalog import CatalogEntry, ServerOptions, _tool_name_for
 from api_client_core.mcp.errors import ToolArgumentError
 from api_client_core.mcp.runner import (
+    _base64_encoded_len,
     _bound_text,
     _bounded_headers,
     _coerce_arguments,
     _coerce_value,
     _connection_failure_detail,
+    _json_safe_body,
+    _list_summary,
     _render_bounded_body,
     _render_full_payload,
     dispatch_endpoint_call,
@@ -544,9 +554,7 @@ class TestFullPayload:
         fallback for a binary response) is base64-encoded in the envelope rather than embedded as-is,
         since bytes can't be placed directly into a JSON structure or an MCP result's structuredContent
         """
-        raw = make_httpx_response(mocker, 200)
-        raw.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
-        raw.content = b"\x89PNG\r\n\x1a\n\xff\xfe"
+        raw = make_httpx_response(mocker, 200, content=b"\x89PNG\r\n\x1a\n\xff\xfe")
         response = RestResponse(_response=raw)
         payload = json.loads(_render_full_payload(response, ServerOptions()))
         assert payload["body"] == {"content_base64": base64.b64encode(raw.content).decode(), "encoding": "base64"}
@@ -603,6 +611,72 @@ class TestFullPayload:
         response = RestResponse(_response=raw)
         payload = json.loads(_render_full_payload(response, ServerOptions(all_headers=True)))
         assert '"id": 1' in payload["body"]["preview"]
+
+    def test_oversized_binary_body_is_truncated_without_full_encoding(self, mocker: MockerFixture) -> None:
+        """Test that a binary body whose base64 form alone would already exceed MAX_RESULT_BYTES is
+        truncated directly. Only a preview-sized prefix is ever encoded, not the whole body, and the
+        preview is identical to what encoding the whole body and slicing it would have produced.
+        `bytes` reports the raw body's byte count rather than a rendered envelope size.
+        """
+        raw_content = bytes(range(256)) * (MAX_RESULT_BYTES // 256 + 10)
+        raw = make_httpx_response(mocker, 200, content=raw_content)
+        response = RestResponse(_response=raw)
+        spy = mocker.spy(base64, "b64encode")
+        payload = json.loads(_render_full_payload(response, ServerOptions()))
+        calls_during_render = list(spy.call_args_list)
+        assert calls_during_render == [mocker.call(raw_content[:TRUNCATION_PREVIEW_CHARS])]
+        assert payload["body"]["truncated"] is True
+        assert payload["body"]["bytes"] == len(raw_content)
+        full_preview = json.dumps(
+            {"content_base64": base64.b64encode(raw_content).decode("ascii"), "encoding": "base64"},
+            default=str,
+            indent=2,
+        )[:TRUNCATION_PREVIEW_CHARS]
+        assert payload["body"]["preview"] == full_preview
+
+    def test_oversized_binary_body_plus_oversized_headers_does_not_nest_the_marker(self, mocker: MockerFixture) -> None:
+        """Test that an oversized binary body and an oversized (--all-headers) header block together
+        still bound the headers, with a single, non-nested body truncation marker
+        """
+        raw_content = bytes(range(256)) * (MAX_RESULT_BYTES // 256 + 10)
+        raw = make_httpx_response(mocker, 200, content=raw_content)
+        raw.headers = {f"x-custom-header-{i}": "v" * 200 for i in range(MAX_RESULT_BYTES // 200)}
+        response = RestResponse(_response=raw)
+        content = _render_full_payload(response, ServerOptions(all_headers=True))
+        payload = json.loads(content)
+        assert payload["body"]["truncated"] is True
+        assert payload["body"]["bytes"] == len(raw_content)
+        assert payload["headers"] == {"x-mcp-headers-truncated": "true"}
+        assert len(content.encode()) <= MAX_RESULT_BYTES
+
+
+class TestJsonSafeBody:
+    """Tests for `_json_safe_body()`'s oversized-binary fast path and its `_base64_encoded_len()` trigger"""
+
+    def test_base64_encoded_len_matches_a_real_encoding(self) -> None:
+        """Test that the analytic base64 length formula matches an actual encoding, for both a
+        3-byte-aligned length and one that needs padding
+        """
+        for n in (0, 1, 2, 3, 4, 100, 3 * 1000, 3 * 1000 + 1, 3 * 1000 + 2):
+            assert _base64_encoded_len(n) == len(base64.b64encode(bytes(n)))
+
+    def test_body_at_the_exact_threshold_is_not_truncated(self) -> None:
+        """Test that a body whose base64 form is exactly MAX_RESULT_BYTES long is still encoded in full,
+        since the fast path only triggers once encoding would exceed (not merely reach) the cap
+        """
+        n = 3 * (MAX_RESULT_BYTES // 4)
+        assert _base64_encoded_len(n) == MAX_RESULT_BYTES
+        body = bytes(n)
+        result = _json_safe_body(body)
+        assert result == {"content_base64": base64.b64encode(body).decode("ascii"), "encoding": "base64"}
+
+    def test_body_one_byte_over_the_threshold_is_truncated(self) -> None:
+        """Test that a body one byte past the exact threshold already triggers the fast, non-full-encode path"""
+        n = 3 * (MAX_RESULT_BYTES // 4) + 1
+        assert _base64_encoded_len(n) > MAX_RESULT_BYTES
+        result = _json_safe_body(bytes(n))
+        assert result["truncated"] is True
+        assert result["bytes"] == n
 
 
 class TestBoundedHeaders:
@@ -714,6 +788,54 @@ class TestConnectionFailureDetail:
         assert _connection_failure_detail(httpx2.ConnectError("boom")) == "ConnectError: boom"
 
 
+class TestListSummary:
+    """Tests for `_list_summary()`'s deduplication and capping of a multi-call failure summary"""
+
+    def test_captured_http_status_errors_with_the_same_status_dedupe_despite_different_request_ids(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test that several captured `HTTPStatusError` items sharing one status code collapse to a
+        single failure detail, rather than one per item, since each carries its own `request_id`
+        """
+        items = []
+        for i in range(5):
+            response = make_httpx_response(mocker, 500)
+            response.request.request_id = f"request-{i}"
+            items.append(httpx2.HTTPStatusError("simulated failure", request=response.request, response=response))
+        summary = _list_summary(items, [False] * len(items))
+        assert summary == "5 of 5 call(s) failed: HTTP 500"
+
+    def test_plain_failed_responses_and_other_exceptions_dedupe(self, mocker: MockerFixture) -> None:
+        """Test that a plain failed `RestResponse` and a non-HTTP exception both dedupe by their own
+        failure detail
+        """
+        responses = [make_rest_response(mocker, 500) for _ in range(3)]
+        items: list[Any] = [*responses, ValueError("boom"), ValueError("boom")]
+        ok_flags = [False] * len(items)
+        summary = _list_summary(items, ok_flags)
+        assert summary == "5 of 5 call(s) failed: HTTP 500; ValueError: boom"
+
+    def test_distinct_details_at_the_cap_show_no_suffix(self) -> None:
+        """Test that exactly `MAX_SUMMARY_FAILURE_DETAILS` distinct failures are all shown, with no
+        "and N more" suffix
+        """
+        items = [AssertionError(f"boom {i}") for i in range(MAX_SUMMARY_FAILURE_DETAILS)]
+        summary = _list_summary(items, [False] * len(items))
+        assert summary.count(";") == MAX_SUMMARY_FAILURE_DETAILS - 1
+        assert "more" not in summary
+
+    def test_distinct_details_over_the_cap_are_capped_with_a_count_of_the_rest(self) -> None:
+        """Test that more than `MAX_SUMMARY_FAILURE_DETAILS` distinct failures show only the first
+        `MAX_SUMMARY_FAILURE_DETAILS`, plus a count of how many more distinct ones were dropped
+        """
+        items = [AssertionError(f"boom {i}") for i in range(10)]
+        summary = _list_summary(items, [False] * len(items))
+        assert summary == (
+            "10 of 10 call(s) failed: AssertionError: boom 0; AssertionError: boom 1; AssertionError: boom 2; "
+            "AssertionError: boom 3; AssertionError: boom 4; and 5 more distinct failure(s)"
+        )
+
+
 class TestCallEndpoint:
     """End-to-end tests for `dispatch_endpoint_call()`'s dispatch and result shaping, against a real (mocked)
     async client
@@ -809,9 +931,7 @@ class TestCallEndpoint:
         """Test that a binary (non-JSON, non-UTF-8) response body never leaves raw bytes in
         structuredContent under any --response-format, since bytes can't be JSON-serialized
         """
-        response = make_httpx_response(mocker, 200)
-        response.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
-        response.content = b"\x89PNG\r\n\x1a\n\xff\xfe"
+        response = make_httpx_response(mocker, 200, content=b"\x89PNG\r\n\x1a\n\xff\xfe")
         response.text = "<binary>"
         async_request_mock.return_value = response
         catalog_entry = _entry(CliTestClient, "widgets", "get_widget")
@@ -821,6 +941,31 @@ class TestCallEndpoint:
             assert result.is_error is False
             if result.structured is not None:
                 json.dumps(result.structured)  # must not raise
+
+    @pytest.mark.parametrize(
+        "status_code,response_format",
+        [(200, ResponseFormat.FULL), (500, ResponseFormat.FULL), (200, ResponseFormat.JSON)],
+    )
+    async def test_oversized_binary_body_is_truncated(
+        self,
+        client: Any,
+        async_request_mock: Any,
+        mocker: MockerFixture,
+        status_code: int,
+        response_format: ResponseFormat,
+    ) -> None:
+        """Test that an oversized binary response body is truncated the same way for a successful call,
+        a failed call, and --response-format json, with `bytes` reporting the raw body's byte count
+        """
+        raw_content = bytes(range(256)) * (MAX_RESULT_BYTES // 256 + 10)
+        async_request_mock.return_value = make_httpx_response(mocker, status_code, content=raw_content)
+        catalog_entry = _entry(CliTestClient, "widgets", "get_widget")
+        options = ServerOptions(response_format=response_format)
+        result = await dispatch_endpoint_call(client, catalog_entry, {"widget_id": 1}, options)
+        assert result.is_error is (status_code != 200)
+        body = result.structured if response_format is ResponseFormat.JSON else result.structured["body"]
+        assert body["truncated"] is True
+        assert body["bytes"] == len(raw_content)
 
     async def test_enum_body_param_reaches_the_wire_as_its_value(self) -> None:
         """Test that an Enum-typed body parameter reaches the real request as its own wire value, not
