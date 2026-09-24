@@ -6,7 +6,6 @@ optional `mcp` SDK, so its tests only run when the `mcp` extra is installed.
 
 from __future__ import annotations
 
-import json
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -313,9 +312,7 @@ class TestDispatchToolCall:
         already-returned result, past _dispatch_tool_call()'s catch-all, crashing the whole
         connection instead of surfacing as one failed tool call.
         """
-        response = make_httpx_response(mocker, 200)
-        response.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
-        response.content = b"\x89PNG\r\n\x1a\n\xff\xfe"
+        response = make_httpx_response(mocker, 200, content=b"\x89PNG\r\n\x1a\n\xff\xfe")
         async_request_mock.return_value = response
         catalog = build_catalog(CliTestClient, ServerOptions())
         result = await _dispatch_tool_call(client, catalog, "widgets__get_widget", {"widget_id": 1}, ServerOptions())

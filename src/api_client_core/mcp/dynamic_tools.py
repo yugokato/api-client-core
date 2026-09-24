@@ -174,10 +174,9 @@ def _search_endpoints_result(catalog: EndpointCatalog, arguments: dict[str, Any]
     """
     raw_limit = arguments.get("limit")
     raw_offset = arguments.get("offset")
-    try:
-        limit = SEARCH_ENDPOINTS_DEFAULT_LIMIT if raw_limit is None else int(raw_limit)
-        offset = SEARCH_ENDPOINTS_MIN_OFFSET if raw_offset is None else int(raw_offset)
-    except (TypeError, ValueError):
+    limit = SEARCH_ENDPOINTS_DEFAULT_LIMIT if raw_limit is None else _as_int(raw_limit)
+    offset = SEARCH_ENDPOINTS_MIN_OFFSET if raw_offset is None else _as_int(raw_offset)
+    if limit is None or offset is None:
         return error_result("'limit' and 'offset' must be integers")
     limit = min(max(limit, SEARCH_ENDPOINTS_MIN_LIMIT), SEARCH_ENDPOINTS_MAX_LIMIT)
     offset = max(offset, SEARCH_ENDPOINTS_MIN_OFFSET)
@@ -197,6 +196,18 @@ def _search_endpoints_result(catalog: EndpointCatalog, arguments: dict[str, Any]
     page = candidates[offset : offset + limit]
     results = [_endpoint_summary(e) for e in page]
     return _json_result({"total": total, "offset": offset, "limit": limit, "results": results})
+
+
+def _as_int(value: Any) -> int | None:
+    """Return `value` if it's a genuine `int` (excluding `bool`, technically an `int` subclass), or `None`
+    otherwise.
+
+    This is the strict check a `limit`/`offset` value needs, since a lenient `int(value)` would silently
+    accept a JSON boolean or truncate a float instead of rejecting it.
+
+    :param value: A raw JSON value
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _ranked_search(entries: list[CatalogEntry], query: str) -> list[CatalogEntry]:

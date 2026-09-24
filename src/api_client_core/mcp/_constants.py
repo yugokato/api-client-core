@@ -32,6 +32,10 @@ TRUNCATION_PREVIEW_CHARS = 2000
 # unusually large header block). Combined with the small, fixed allowlist this falls back to, the
 # result stays well under the cap regardless of how large a single header value was.
 MAX_HEADER_VALUE_CHARS = 500
+# Cap on the number of distinct failure details shown in a with_repeat()/with_concurrency() group's
+# one-line summary, which sits outside MAX_RESULT_BYTES: a with_max_response_time() assertion under
+# with_repeat(num=large) can otherwise produce one distinct message per call.
+MAX_SUMMARY_FAILURE_DETAILS = 5
 # The reserved tool-argument key carrying a call's with_xxx() wrappers.
 CALL_WRAPPERS_KEY = "call_wrappers"
 # search_endpoints' limit/offset bounds, enforced at dispatch time since the published schema alone

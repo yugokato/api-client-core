@@ -203,7 +203,9 @@ Response headers are limited to a fixed allowlist by default, since a result rea
 
 `WWW-Authenticate` is a challenge (scheme/realm/error), not a credential, so it's included even on a failed auth attempt. `--all-headers` opts out and returns every header, including any sensitive one (`Set-Cookie`, `Authorization`, ...).
 
-A result larger than 256 KiB once rendered (headers included) is never sent whole. The oversized part (a single call's `body`, or a `with_repeat`/`with_concurrency` group's whole `results` array) is replaced with `{"truncated": true, "bytes": ..., "preview": "..."}`, where `preview` holds roughly the first 2000 characters so the model can still see the response's shape. This is a fixed limit with no flag to raise it, since an oversized result can break the connection.
+A response body that's binary content, rather than JSON or UTF-8 text, is shown as `{"content_base64": "...", "encoding": "base64"}` instead of being embedded directly, since raw bytes can't be placed into a JSON structure.
+
+A result larger than 256 KiB once rendered (headers included) is never sent whole. The oversized part (a single call's `body`, or a `with_repeat`/`with_concurrency` group's whole `results` array) is replaced with `{"truncated": true, "bytes": ..., "preview": "..."}`, where `preview` holds roughly the first 2000 characters so the model can still see the response's shape. For an oversized binary body, `bytes` is the raw body's own size rather than a rendered size, since that's the more meaningful number for binary content. This is a fixed limit with no flag to raise it, since an oversized result can break the connection.
 
 A non-2xx response, a bad argument (an unrecognized key, a missing required one, a malformed file), and an unexpected error (a network failure) are all reported as `isError: true`, never as a raised protocol error. A bad argument or an unexpected error is a one-line detail. A non-2xx response also includes the API's `{status_code, headers, body}` envelope, since that body is often what lets the model correct its arguments and retry.
 

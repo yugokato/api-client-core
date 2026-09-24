@@ -94,6 +94,17 @@ class TestSearchEndpoints:
         assert result.structured["limit"] == SEARCH_ENDPOINTS_DEFAULT_LIMIT
         assert result.structured["offset"] == 0
 
+    @pytest.mark.parametrize("value", [True, False, 1.5, "5", float("inf")])
+    def test_non_int_values_are_rejected(self, value: Any) -> None:
+        """Test that a bool, float, numeric string, or infinity is rejected as a non-integer, rather than
+        silently coerced (a bool truthiness-coerced to 0/1, a float truncated, a numeric string parsed)
+        """
+        catalog = build_catalog(CliTestClient, ServerOptions())
+        for arguments in ({"limit": value}, {"offset": value}):
+            result = _search_endpoints_result(catalog, arguments)
+            assert result.is_error is True
+            assert result.content == "'limit' and 'offset' must be integers"
+
 
 class TestDescribeEndpointPayload:
     """Tests for `_describe_endpoint_payload()`'s payload shape: one `input_schema`, not a second,

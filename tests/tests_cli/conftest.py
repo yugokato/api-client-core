@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import logging
 import sys
 from collections.abc import Iterator
@@ -358,8 +359,10 @@ def patch_argcomplete_installed(mocker: MockerFixture, *, installed: bool) -> No
     mocker.patch("api_client_core.cli.builder.importlib.util.find_spec", side_effect=fake_find_spec)
 
 
-def make_httpx_response(mocker: MockerFixture, status_code: int, *, json_body: Any = None, text: str = "") -> Response:
-    """Build a minimal mocked httpx2 `Response` with the given status code and JSON/text body.
+def make_httpx_response(
+    mocker: MockerFixture, status_code: int, *, json_body: Any = None, text: str = "", content: bytes | None = None
+) -> Response:
+    """Build a minimal mocked httpx2 `Response` with the given status code and JSON/text/binary body.
 
     `raise_for_status()` mirrors the real one: it returns the response for a 2xx and raises
     `HTTPStatusError` (carrying this same response) for anything else, so a `raise_on_error=True` client
@@ -369,17 +372,23 @@ def make_httpx_response(mocker: MockerFixture, status_code: int, *, json_body: A
     :param status_code: HTTP status code the mocked response reports
     :param json_body: Value returned by the mocked response's `.json()`. Defaults to `{}`
     :param text: Value for the mocked response's `.text`, used as a fallback body
+    :param content: Binary body content. When given, `.json()` raises `JSONDecodeError` (mirroring a real
+                    binary response that doesn't decode as JSON) and `.content` returns this value
     """
     r = mocker.MagicMock(spec=Response)
     r.status_code = status_code
     r.is_success = 200 <= status_code < 300
     r.reason_phrase = _reason_phrase(status_code)
     r.headers = {}
-    r.content = b"{}"
     r.is_stream = False
     r.elapsed = mocker.MagicMock()
     r.elapsed.total_seconds.return_value = 0.0
-    r.json.return_value = {} if json_body is None else json_body
+    if content is not None:
+        r.content = content
+        r.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
+    else:
+        r.content = b"{}"
+        r.json.return_value = {} if json_body is None else json_body
     r.text = text
     r.request = mocker.MagicMock()
     r.request.request_id = "test-request-id"
