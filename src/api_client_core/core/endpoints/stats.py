@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field, fields
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Concatenate, Literal, ParamSpec, get_args
+from typing import TYPE_CHECKING, Any, Concatenate, Literal, ParamSpec, Self, get_args
 
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.lock import Lock
@@ -169,7 +169,7 @@ class EndpointStat:
         self.num_calls += 1
         self.num_errors += 1
 
-    def copy(self) -> EndpointStat:
+    def copy(self) -> Self:
         """Return an independent snapshot of this stat record."""
         return deepcopy(self)
 
@@ -208,7 +208,7 @@ class EndpointStat:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> EndpointStat:
+    def from_dict(cls, d: dict[str, Any]) -> Self:
         """Reconstruct from a `to_dict()` payload.
 
         Missing keys keep their dataclass defaults. Unknown keys are ignored. Tolerates payloads written by a
@@ -416,7 +416,7 @@ class StatsCollector:
             print(report_str)  # noqa: T201
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> StatsCollector:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Reconstruct a `StatsCollector` from a `to_dict()` payload.
 
         :param data: Dict produced by `to_dict()` or `Stats.to_dict()`.

@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable, Sequence
 from itertools import takewhile
 from textwrap import wrap
-from typing import IO, Any, NoReturn, TextIO, cast
+from typing import IO, Any, NoReturn, Self, TextIO, cast
 
 from common_libs.ansi_colors import ColorCodes, color
 
@@ -122,7 +122,7 @@ class CollapsibleText(str):
 
     short: str
 
-    def __new__(cls, text: str, *, short: str) -> CollapsibleText:
+    def __new__(cls, text: str, *, short: str) -> Self:
         obj = super().__new__(cls, text)
         obj.short = short
         return obj

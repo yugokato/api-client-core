@@ -7,7 +7,7 @@ import pkgutil
 import sys
 from abc import ABCMeta
 from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 
 from common_libs.logging import get_logger
 from httpx2 import HTTPError
@@ -146,7 +146,7 @@ class BaseAPI(Generic[APIClientT], metaclass=ABCMeta):
         return []
 
     @classmethod
-    def init(cls: type[APIClassT]) -> list[type[APIClassT]]:
+    def init(cls) -> list[type[Self]]:
         """Initialize API classes and return a list of API classes.
 
         Call this on either an app-level base class whose concrete API classes subclass it or directly on `BaseAPI`
