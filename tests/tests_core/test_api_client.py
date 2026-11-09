@@ -47,14 +47,12 @@ class TestAPIClientAppName:
         with pytest.raises(TypeError, match="must set a non-empty 'app_name' class attribute"):
             EmptyNameClient(base_url=BASE_URL)
 
-    def test_subclass_with_non_str_app_name_raises_type_error(self) -> None:
-        """Test that a subclass declaring a non-str `app_name` raises TypeError on construction"""
-
-        class NonStrNameClient(APIClient):
-            app_name = 123
+    def test_subclass_with_non_str_app_name_raises_type_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a subclass whose `app_name` is not a str raises TypeError on construction"""
+        monkeypatch.setattr(MyAppClient, "app_name", 123)
 
         with pytest.raises(TypeError, match="must set a non-empty 'app_name' class attribute"):
-            NonStrNameClient(base_url=BASE_URL)
+            MyAppClient(base_url=BASE_URL)
 
     def test_subclass_with_a_declared_app_name_constructs(self) -> None:
         """Test that a subclass declaring a non-empty `app_name` constructs successfully and exposes it"""
